@@ -2,9 +2,9 @@ from .common import AdditiveAttention, ResNetGrid, nn, torch
 
 
 class AttentionRNN(nn.Module):
-    def __init__(self, vocab_size: int, embedding_dim: int = 512, hidden_dim: int = 512, freeze_encoder: bool = True):
+    def __init__(self, vocab_size: int, embedding_dim: int = 512, hidden_dim: int = 512, freeze_encoder: bool = True, resnet_path: str | None = None):
         super().__init__()
-        self.encoder = ResNetGrid(freeze_encoder)
+        self.encoder = ResNetGrid(freeze_encoder, resnet_path)
         self.visual_attention = nn.MultiheadAttention(self.encoder.output_dim, 8, batch_first=True)
         self.embedding = nn.Embedding(vocab_size, embedding_dim)
         self.feature_projection = nn.Linear(self.encoder.output_dim, hidden_dim)

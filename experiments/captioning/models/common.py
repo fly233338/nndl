@@ -2,7 +2,11 @@ import torch
 nn = torch.nn
 
 
-def load_resnet(pretrained: bool = True):
+def load_resnet(pretrained: bool = True, model_path: str | None = None):
+    if model_path:
+        from transformers import AutoModel
+
+        return AutoModel.from_pretrained(model_path, local_files_only=True), 2048
     from torchvision.models import ResNet50_Weights, resnet50
     model = resnet50(weights=ResNet50_Weights.DEFAULT if pretrained else None)
     features = nn.Sequential(*list(model.children())[:-2])
@@ -10,42 +14,59 @@ def load_resnet(pretrained: bool = True):
 
 
 class ResNetGlobal(nn.Module):
-    def __init__(self, freeze: bool = True):
+    def __init__(self, freeze: bool = True, model_path: str | None = None):
         super().__init__()
-        self.features, self.output_dim = load_resnet()
+        self.features, self.output_dim = load_resnet(model_path=model_path)
+        self.huggingface = bool(model_path)
         if freeze:
             for parameter in self.features.parameters():
                 parameter.requires_grad = False
 
     def forward(self, images):
         fmap = self.features(images)
+        if self.huggingface:
+            fmap = fmap.last_hidden_state
         return fmap.mean(dim=(-2, -1))
 
 
 class ResNetGrid(nn.Module):
-    def __init__(self, freeze: bool = True):
+    def __init__(self, freeze: bool = True, model_path: str | None = None):
         super().__init__()
-        self.features, self.output_dim = load_resnet()
+        self.features, self.output_dim = load_resnet(model_path=model_path)
+        self.huggingface = bool(model_path)
         if freeze:
             for parameter in self.features.parameters():
                 parameter.requires_grad = False
 
     def forward(self, images):
         fmap = self.features(images)
+        if self.huggingface:
+            fmap = fmap.last_hidden_state
         return fmap.flatten(2).transpose(1, 2)
 
 
 class ViTPatches(nn.Module):
-    def __init__(self, freeze: bool = True):
+    def __init__(self, freeze: bool = True, model_path: str | None = None):
         super().__init__()
-        from torchvision.models import ViT_B_16_Weights, vit_b_16
-        self.model = vit_b_16(weights=ViT_B_16_Weights.DEFAULT)
-        self.output_dim = self.model.hidden_dim
+        if model_path:
+            from transformers import AutoModel
+
+            self.model = AutoModel.from_pretrained(model_path, local_files_only=True)
+            self.output_dim = int(self.model.config.hidden_size)
+            self.huggingface = True
+        else:
+            from torchvision.models import ViT_B_16_Weights, vit_b_16
+
+            self.model = vit_b_16(weights=ViT_B_16_Weights.DEFAULT)
+            self.output_dim = self.model.hidden_dim
+            self.huggingface = False
         if freeze:
             for parameter in self.model.parameters():
                 parameter.requires_grad = False
 
     def forward(self, images):
+        if self.huggingface:
+            return self.model(pixel_values=images).last_hidden_state
         x = self.model._process_input(images)
         n = x.shape[0]
         batch_class = self.model.class_token.expand(n, -1, -1)

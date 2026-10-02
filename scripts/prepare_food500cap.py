@@ -14,11 +14,19 @@ def _load_rows(path: Path) -> list[dict[str, Any]]:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
+def _image_name(row: dict[str, Any]) -> str:
+    # Food-500 Cap uses ``filename``; accept ``image`` for compatible exports.
+    image = row.get("filename") or row.get("image")
+    if not image:
+        raise KeyError("Food-500 Cap row must contain 'filename' or 'image'")
+    return str(image)
+
+
 def prepare(train_json: str, test_json: str, image_root: str, output_dir: str, val_ratio: float = 0.1, seed: int = 2026) -> None:
     rows = _load_rows(Path(train_json))
     grouped: dict[str, list[str]] = defaultdict(list)
     for row in rows:
-        grouped[str(row["image"])].append(str(row["caption"]).strip())
+        grouped[_image_name(row)].append(str(row["caption"]).strip())
 
     image_root_path = Path(image_root)
     samples = [{"image_id": image, "image_path": image, "captions": captions} for image, captions in sorted(grouped.items())]
@@ -28,7 +36,7 @@ def prepare(train_json: str, test_json: str, image_root: str, output_dir: str, v
     test_rows = _load_rows(Path(test_json))
     test_grouped: dict[str, list[str]] = defaultdict(list)
     for row in test_rows:
-        test_grouped[str(row["image"])].append(str(row["caption"]).strip())
+        test_grouped[_image_name(row)].append(str(row["caption"]).strip())
     test = [{"image_id": image, "image_path": image, "captions": captions} for image, captions in sorted(test_grouped.items())]
 
     output = Path(output_dir)
