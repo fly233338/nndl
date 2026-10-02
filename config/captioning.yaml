@@ -5,8 +5,8 @@ output_dir: results/captioning
 image_size: 224
 batch_size: 16
 num_workers: 2
-epochs: 10
-patience: 3
+epochs: 20
+patience: 4
 min_delta: 0.001
 learning_rate: 0.0001
 max_length: 64
