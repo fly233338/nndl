@@ -1,0 +1,25 @@
+seed: 2026
+caption:
+  train_caption_json: ""
+  test_caption_json: ""
+  image_root: ""
+  output_dir: "data/processed/food500cap"
+  val_ratio: 0.1
+meal_json:
+  source_path: ""
+  image_root: ""
+  output_dir: "data/processed/meal_json"
+  split_seed: 2026
+  val_ratio: 0.1
+  test_ratio: 0.1
+  fields:
+    image: image
+    image_id: image_id
+    items: items
+    item_name: name
+    item_weight: weight_g
+    total_weight: total_weight_g
+    calories: total_calories_kcal
+    protein: protein_g
+    fat: fat_g
+    carbohydrate: carbohydrate_g

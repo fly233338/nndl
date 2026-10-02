@@ -1,0 +1,10 @@
+AGENTS.md
+docs
+data/
+results/
+checkpoints/
+__pycache__/
+*.pyc
+.venv/
+.cache/
+tmp

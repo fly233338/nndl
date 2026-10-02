@@ -1,0 +1,23 @@
+seed: 2026
+data_dir: data/processed/food500cap
+image_root: ""
+output_dir: results/captioning
+image_size: 224
+batch_size: 16
+num_workers: 2
+epochs: 10
+learning_rate: 0.0001
+max_length: 64
+embedding_dim: 512
+hidden_dim: 512
+num_layers: 4
+num_heads: 8
+freeze_encoder: true
+beam_size: 3
+vision: resnet50
+models:
+  - cnn_gru
+  - attention_rnn
+  - transformer
+  - graph_transformer
+  - vit_transformer
