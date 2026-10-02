@@ -12,6 +12,7 @@ def build_model(name: str, vocab_size: int, config: dict):
     if name == "attention_rnn":
         from .attention_rnn import AttentionRNN
         return AttentionRNN(**common)
+
     transformer = {
         "embedding_dim": config.get("embedding_dim", 512),
         "layers": config.get("num_layers", 4),
@@ -22,10 +23,20 @@ def build_model(name: str, vocab_size: int, config: dict):
     }
     if name == "transformer":
         from .transformer_captioner import GridTransformer
-        return GridTransformer(vocab_size=vocab_size, **transformer)
+        return GridTransformer(
+            vocab_size=vocab_size,
+            **transformer,
+            use_visual_encoder=config.get("use_visual_encoder", True),
+            use_2d_position=config.get("use_2d_position", True),
+        )
     if name == "graph_transformer":
         from .graph_captioner import GraphTransformer
-        return GraphTransformer(vocab_size=vocab_size, **transformer)
+        return GraphTransformer(
+            vocab_size=vocab_size,
+            **transformer,
+            graph_layers=config.get("graph_layers", 2),
+            use_visual_encoder=config.get("graph_use_visual_encoder", False),
+        )
     if name == "vit_transformer":
         from .vit_transformer import ViTTransformer
         transformer["vit_path"] = config.get("vit_path")

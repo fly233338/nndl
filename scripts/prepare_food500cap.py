@@ -7,6 +7,8 @@ from collections import defaultdict
 from pathlib import Path
 from typing import Any
 
+from PIL import Image
+
 from utils.jsonl import write_jsonl
 
 
@@ -38,6 +40,14 @@ def prepare(train_json: str, test_json: str, image_root: str, output_dir: str, v
     for row in test_rows:
         test_grouped[_image_name(row)].append(str(row["caption"]).strip())
     test = [{"image_id": image, "image_path": image, "captions": captions} for image, captions in sorted(test_grouped.items())]
+    overlap = {row["image_id"] for row in train} & {row["image_id"] for row in test}
+    if overlap:
+        raise ValueError(f"train/test image overlap: {len(overlap)}")
+    for row in samples + test:
+        if not row["captions"] or any(not caption for caption in row["captions"]):
+            raise ValueError(f"empty caption for {row['image_id']}")
+        with Image.open(image_root_path / row["image_path"]):
+            pass
 
     output = Path(output_dir)
     output.mkdir(parents=True, exist_ok=True)

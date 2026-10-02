@@ -9,4 +9,4 @@ huggingface_hub>=0.25
 peft>=0.13
 accelerate>=0.34
 sentencepiece>=0.2
-pycocoevalcap @ git+https://github.com/salaniz/pycocoevalcap.git
+pycocoevalcap==1.2

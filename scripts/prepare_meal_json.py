@@ -9,6 +9,7 @@ from typing import Any
 import yaml
 
 from utils.jsonl import write_jsonl
+from experiments.meal_json.schema import validate_meal
 
 
 def _read_source(path: Path) -> list[dict[str, Any]]:
@@ -46,13 +47,24 @@ def prepare(config_path: str) -> None:
     rows = _read_source(Path(section["source_path"]))
     image_root = Path(section["image_root"])
     samples = [normalize(row, fields, image_root) for row in rows]
-    random.Random(section.get("split_seed", 2026)).shuffle(samples)
+    for sample in samples:
+        valid, errors, _ = validate_meal(sample["label"])
+        if not valid:
+            raise ValueError(f"invalid label {sample['image_id']}: {errors}")
+    groups = {}
+    for sample in samples:
+        groups.setdefault(sample["image_id"], []).append(sample)
+    group_ids = list(groups)
+    random.Random(section.get("split_seed", 2026)).shuffle(group_ids)
     val_ratio, test_ratio = section.get("val_ratio", 0.1), section.get("test_ratio", 0.1)
-    test_count = int(len(samples) * test_ratio)
-    val_count = int(len(samples) * val_ratio)
-    test = samples[:test_count]
-    val = samples[test_count:test_count + val_count]
-    train = samples[test_count + val_count:]
+    test_count = int(len(group_ids) * test_ratio)
+    val_count = int(len(group_ids) * val_ratio)
+    test_ids = set(group_ids[:test_count])
+    val_ids = set(group_ids[test_count:test_count + val_count])
+    train_ids = set(group_ids[test_count + val_count:])
+    test = [sample for image_id in test_ids for sample in groups[image_id]]
+    val = [sample for image_id in val_ids for sample in groups[image_id]]
+    train = [sample for image_id in train_ids for sample in groups[image_id]]
     output = Path(section["output_dir"])
     output.mkdir(parents=True, exist_ok=True)
     write_jsonl(train, output / "train.jsonl")

@@ -66,6 +66,13 @@ def prepare(dataset_dir: str, output_dir: str, val_ratio: float = 0.1, seed: int
     cut = int(len(samples) * (1 - val_ratio))
     train, val = samples[:cut], samples[cut:]
     test = _read_split(test_files, "test", image_dir)
+    train_ids = {row["image_id"] for row in train}
+    val_ids = {row["image_id"] for row in val}
+    test_ids = {row["image_id"] for row in test}
+    if train_ids & val_ids or train_ids & test_ids or val_ids & test_ids:
+        raise ValueError("image split overlap detected")
+    if any(not caption for row in samples + test for caption in row["captions"]):
+        raise ValueError("empty caption detected")
 
     output.mkdir(parents=True, exist_ok=True)
     write_jsonl(train, output / "train.jsonl")

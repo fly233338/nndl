@@ -16,12 +16,12 @@ def image_transform(size: int = 224, train: bool = False):
 
 
 class CaptionDataset:
-    def __init__(self, manifest: str | Path, image_root: str | Path, vocab, max_length: int = 64, train: bool = False):
+    def __init__(self, manifest: str | Path, image_root: str | Path, vocab, max_length: int = 64, train: bool = False, image_size: int = 224):
         self.rows = list(read_jsonl(manifest))
         self.image_root = Path(image_root)
         self.vocab = vocab
         self.max_length = max_length
-        self.transform = image_transform(train=train)
+        self.transform = image_transform(image_size, train=train)
         self.items = [(row, caption) for row in self.rows for caption in row.get("captions", [""])]
 
     def __len__(self):

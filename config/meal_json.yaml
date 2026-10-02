@@ -2,6 +2,8 @@ seed: 2026
 data_dir: data/processed/meal_json
 image_root: ""
 output_dir: results/meal_json
+image_size: 224
+caption_model: cnn_gru
 max_length: 256
 caption_model_checkpoint: ""
 text_projection_template: "A meal contains {items}."
@@ -17,5 +19,7 @@ qwen:
   epochs: 3
   batch_size: 1
   gradient_accumulation_steps: 8
+  image_size: 448
+  gradient_checkpointing: false
 comparison_model:
   model_name: Qwen/Qwen2.5-VL-3B-Instruct

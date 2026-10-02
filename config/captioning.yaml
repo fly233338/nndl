@@ -16,6 +16,10 @@ num_layers: 4
 num_heads: 8
 freeze_encoder: true
 beam_size: 3
+validation_decode: beam
+graph_layers: 2
+use_visual_encoder: true
+use_2d_position: true
 vision: resnet50
 resnet_path: models/resnet-50
 vit_path: models/vit-base-patch16-224

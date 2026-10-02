@@ -3,6 +3,10 @@ from collections import Counter
 from pathlib import Path
 
 
+_CJK = re.compile(r"[\u3400-\u9fff]")
+_TOKEN = re.compile(r"[A-Za-z0-9]+(?:[-'][A-Za-z0-9]+)*|[\u3400-\u9fff]|[^\w\s]")
+
+
 class Vocabulary:
     specials = ("<pad>", "<bos>", "<eos>", "<unk>")
 
@@ -12,7 +16,7 @@ class Vocabulary:
 
     @staticmethod
     def tokenize(text: str) -> list[str]:
-        return re.findall(r"[A-Za-z0-9]+(?:[-'][A-Za-z0-9]+)*|[^\w\s]", text.lower())
+        return _TOKEN.findall(text.lower())
 
     @classmethod
     def build(cls, captions: list[str], min_freq: int = 1) -> "Vocabulary":
@@ -25,10 +29,11 @@ class Vocabulary:
         return vocab
 
     def encode(self, text: str, max_length: int) -> list[int]:
-        ids = [self.token_to_id["<bos>"]]
-        ids.extend(self.token_to_id.get(token, self.token_to_id["<unk>"]) for token in self.tokenize(text))
-        ids.append(self.token_to_id["<eos>"])
-        return ids[:max_length]
+        if max_length < 2:
+            raise ValueError("max_length must leave room for BOS and EOS")
+        body = [self.token_to_id.get(token, self.token_to_id["<unk>"]) for token in self.tokenize(text)]
+        body = body[: max_length - 2]
+        return [self.token_to_id["<bos>"], *body, self.token_to_id["<eos>"]]
 
     def decode(self, ids: list[int]) -> str:
         tokens = []
@@ -38,8 +43,23 @@ class Vocabulary:
                 break
             if token not in self.specials:
                 tokens.append(token)
-        text = " ".join(tokens)
-        return re.sub(r"\s+([,.!?;:])", r"\1", text).strip()
+        text = ""
+        previous = ""
+        punctuation = set(",.!?;:%)]}，。！？；：、）】》")
+        opening = set("([{【《“‘")
+        for token in tokens:
+            if not text:
+                text = token
+            elif _CJK.fullmatch(token) or token in punctuation:
+                text += token
+            elif _CJK.search(previous):
+                text += " " + token
+            elif previous in opening:
+                text += token
+            else:
+                text += " " + token
+            previous = token
+        return text.strip()
 
     def save(self, path: str | Path) -> None:
         import json

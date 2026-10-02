@@ -28,17 +28,53 @@ class AttentionRNN(nn.Module):
             outputs.append(self.output(hidden).unsqueeze(1))
         return torch.cat(outputs, 1)
 
+    def _step(self, features, hidden, token):
+        context, _ = self.attention(features, hidden)
+        hidden = self.cell(torch.cat([self.embedding(token), context], -1), hidden)
+        return self.output(hidden), hidden
+
     @torch.no_grad()
     def generate(self, images, bos_id, eos_id, max_length, beam_size=1):
         features = self._features(images)
-        hidden = self.initial(features.mean(1))
-        current = torch.full((images.size(0),), bos_id, device=images.device, dtype=torch.long)
-        outputs = [current.unsqueeze(1)]
-        for _ in range(max_length - 1):
-            context, _ = self.attention(features, hidden)
-            hidden = self.cell(torch.cat([self.embedding(current), context], -1), hidden)
-            current = self.output(hidden).argmax(-1)
-            outputs.append(current.unsqueeze(1))
-            if (current == eos_id).all():
-                break
-        return torch.cat(outputs, 1)
+        if beam_size <= 1:
+            hidden = self.initial(features.mean(1))
+            current = torch.full((images.size(0),), bos_id, device=images.device, dtype=torch.long)
+            outputs = [current.unsqueeze(1)]
+            finished = torch.zeros(images.size(0), dtype=torch.bool, device=images.device)
+            for _ in range(max_length - 1):
+                logits, hidden = self._step(features, hidden, current)
+                current = logits.argmax(-1)
+                current = torch.where(finished, torch.full_like(current, eos_id), current)
+                outputs.append(current.unsqueeze(1))
+                finished |= current.eq(eos_id)
+                if finished.all():
+                    break
+            return torch.cat(outputs, 1)
+
+        results = []
+        for index in range(images.size(0)):
+            sample_features = features[index:index + 1]
+            initial = self.initial(sample_features.mean(1))
+            beams = [(torch.tensor([bos_id], device=images.device), initial, 0.0, False)]
+            for _ in range(max_length - 1):
+                candidates = []
+                for sequence, hidden, score, finished in beams:
+                    if finished:
+                        candidates.append((sequence, hidden, score, True))
+                        continue
+                    logits, next_hidden = self._step(sample_features, hidden, sequence[-1:])
+                    values, indices = logits.log_softmax(-1).topk(min(beam_size, logits.size(-1)), dim=-1)
+                    for value, token_id in zip(values[0], indices[0]):
+                        token = token_id.view(1)
+                        candidates.append((torch.cat([sequence, token]), next_hidden.clone(), score + float(value), bool(token_id == eos_id)))
+                candidates.sort(key=lambda item: item[2], reverse=True)
+                beams = candidates[:beam_size]
+                if all(item[3] for item in beams):
+                    break
+            results.append(beams[0][0])
+
+        width = max(sequence.numel() for sequence in results)
+        output = torch.full((len(results), width), eos_id, device=images.device, dtype=torch.long)
+        for index, sequence in enumerate(results):
+            output[index, :sequence.numel()] = sequence
+        return output

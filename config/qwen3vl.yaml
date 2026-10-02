@@ -1,2 +1,2 @@
-base: config/meal_json.yaml
+base: meal_json.yaml
 method: direct
