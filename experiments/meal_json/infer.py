@@ -4,7 +4,7 @@ from pathlib import Path
 
 import torch
 from PIL import Image
-from transformers import AutoModelForVision2Seq, AutoProcessor
+from transformers import AutoModelForImageTextToText, AutoProcessor
 from .prompts import direct_prompt, items_prompt, nutrients_prompt
 from .schema import parse_and_validate
 from utils.jsonl import write_jsonl
@@ -18,7 +18,7 @@ def extract_json(text: str) -> str:
 def qwen_predict(model_dir: str, image_path: str, mode: str = "direct", items: dict | None = None) -> str:
     device = "cuda" if torch.cuda.is_available() else "cpu"
     processor = AutoProcessor.from_pretrained(model_dir, trust_remote_code=True)
-    model = AutoModelForVision2Seq.from_pretrained(model_dir, torch_dtype=torch.bfloat16 if torch.cuda.is_bf16_supported() else torch.float16, trust_remote_code=True).to(device).eval()
+    model = AutoModelForImageTextToText.from_pretrained(model_dir, torch_dtype=torch.bfloat16 if torch.cuda.is_bf16_supported() else torch.float16, trust_remote_code=True).to(device).eval()
     prompt = direct_prompt() if mode == "direct" else items_prompt() if mode == "items" else nutrients_prompt(items or {})
     encoded = processor(text=prompt, images=Image.open(image_path).convert("RGB"), return_tensors="pt")
     encoded = {key: value.to(device) for key, value in encoded.items() if hasattr(value, "to")}

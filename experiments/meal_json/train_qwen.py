@@ -11,7 +11,7 @@ from pathlib import Path
 import torch
 from PIL import Image
 from peft import LoraConfig, TaskType, get_peft_model
-from transformers import AutoModelForVision2Seq, AutoProcessor, TrainingArguments, Trainer
+from transformers import AutoModelForImageTextToText, AutoProcessor, TrainingArguments, Trainer
 from utils.config import load_yaml
 from utils.jsonl import read_jsonl
 from utils.seed import seed_everything
@@ -25,7 +25,7 @@ def train(config_path: str, mode: str = "direct", model_name: str | None = None)
     qwen = config["qwen"]
     model_name = model_name or qwen["model_name"]
     processor = AutoProcessor.from_pretrained(model_name, trust_remote_code=True)
-    model = AutoModelForVision2Seq.from_pretrained(model_name, torch_dtype=torch.bfloat16 if torch.cuda.is_bf16_supported() else torch.float16, trust_remote_code=True)
+    model = AutoModelForImageTextToText.from_pretrained(model_name, torch_dtype=torch.bfloat16 if torch.cuda.is_bf16_supported() else torch.float16, trust_remote_code=True)
     lora = LoraConfig(r=qwen["lora_r"], lora_alpha=qwen["lora_alpha"], lora_dropout=qwen["lora_dropout"], target_modules=qwen["target_modules"], task_type=TaskType.CAUSAL_LM)
     model = get_peft_model(model, lora)
     model.print_trainable_parameters()
