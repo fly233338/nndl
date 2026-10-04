@@ -1,0 +1,21 @@
+{
+  "BLEU-1": 0.29567733148851055,
+  "BLEU-2": 0.13623751211446922,
+  "BLEU-3": 0.07019889156467103,
+  "BLEU-4": 0.035707590944429775,
+  "METEOR": 0.0964365432072949,
+  "ROUGE-L": 0.24171629886322082,
+  "CIDEr-D": 0.22738537736769696,
+  "SPICE": 0.09213518076095217,
+  "num_samples": 4938,
+  "checkpoint": "results/captioning/cnn_gru/best.pt",
+  "decode": "greedy",
+  "beam_size": 1,
+  "image_size": 224,
+  "metric_metadata": {
+    "pycocoevalcap": "1.2",
+    "tokenizer": "PTBTokenizer",
+    "scale": "raw (no x100); CIDEr-D uses scorer x10",
+    "cider_sigma": 6.0
+  }
+}
