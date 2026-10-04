@@ -4,7 +4,8 @@ image_root: ""
 output_dir: results/meal_json
 image_size: 224
 caption_model: vit_transformer
-max_length: 256
+vit_path: models/vit-base-patch16-224
+max_length: 512
 caption_model_checkpoint: results/captioning/vit_transformer/best.pt
 freeze_encoder: false
 text_projection_template: "A meal contains {items}."
