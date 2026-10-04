@@ -3,9 +3,10 @@ data_dir: data/processed/meal_json
 image_root: ""
 output_dir: results/meal_json
 image_size: 224
-caption_model: cnn_gru
+caption_model: vit_transformer
 max_length: 256
-caption_model_checkpoint: ""
+caption_model_checkpoint: results/captioning/vit_transformer/best.pt
+freeze_encoder: false
 text_projection_template: "A meal contains {items}."
 qwen:
   model_name: Qwen/Qwen3-VL-4B-Instruct

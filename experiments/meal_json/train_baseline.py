@@ -69,12 +69,10 @@ def train(config_path: str, model_name: str | None = None):
     if not train_rows:
         raise ValueError("No meal training rows found. Run prepare_meal_json.py first.")
     if model_name is None:
-        caption_checkpoint = config.get("caption_model_checkpoint")
-        if caption_checkpoint and Path(caption_checkpoint).exists():
-            caption_state = torch.load(caption_checkpoint, map_location="cpu", weights_only=False)
-            model_name = caption_state["model_name"]
-        else:
-            model_name = config.get("caption_model", "cnn_gru")
+        model_name = config.get("caption_model", "vit_transformer")
+    caption_checkpoint = config.get("caption_model_checkpoint")
+    if caption_checkpoint and not Path(caption_checkpoint).exists():
+        raise FileNotFoundError(f"Caption model checkpoint not found: {caption_checkpoint}")
     texts = [canonical_json(row["label"]) for row in train_rows]
     tokenizer = JSONTokenizer.build(texts)
     image_root = config.get("image_root", "") or json.loads((data_dir / "dataset_info.json").read_text(encoding="utf-8")).get("image_root", "")
@@ -87,6 +85,21 @@ def train(config_path: str, model_name: str | None = None):
     val_loader = torch.utils.data.DataLoader(val_set, batch_size=config.get("batch_size", 4), shuffle=False, collate_fn=collate)
     from experiments.captioning.models import build_model
     model = build_model(model_name, len(tokenizer.token_to_id), {**config, "max_length": max_length})
+    if caption_checkpoint:
+        caption_state = torch.load(caption_checkpoint, map_location="cpu", weights_only=False)
+        if caption_state.get("model_name") != model_name:
+            raise ValueError(f"Checkpoint model {caption_state.get('model_name')} does not match {model_name}")
+        current_state = model.state_dict()
+        transferred = {
+            key: value
+            for key, value in caption_state["model"].items()
+            if key in current_state
+            and current_state[key].shape == value.shape
+            and not key.startswith("decoder.embedding.")
+            and not key.startswith("decoder.output.")
+        }
+        model.load_state_dict(transferred, strict=False)
+        print(f"loaded {len(transferred)} compatible parameters from {caption_checkpoint}")
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model.to(device)
     optimizer = torch.optim.AdamW((parameter for parameter in model.parameters() if parameter.requires_grad), lr=config.get("learning_rate", 1e-4))

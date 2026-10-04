@@ -81,15 +81,22 @@ def structured_metrics(rows):
 
     micro, macro = item_scores(gold, predicted)
     result = evaluate_caption_records(text_records)
+    schema_valid_rate = valid_count / max(1, len(rows))
+    mse = {field: sums[field] / counts[field] if counts[field] else None for field in NUMERIC_FIELDS}
+    numeric_coverage = {field: counts[field] / max(1, len(rows)) for field in NUMERIC_FIELDS}
     result.update({
         "json_parse_rate": parsed_count / max(1, len(rows)),
-        "schema_valid_rate": valid_count / max(1, len(rows)),
+        "schema_valid_rate": schema_valid_rate,
         "field_complete_rate": complete_count / max(1, len(rows)),
         "weight_consistency_rate": consistency_valid / consistency_total if consistency_total else None,
         "item_micro_f1": micro,
         "item_macro_f1": macro,
-        "mse": {field: sums[field] / counts[field] if counts[field] else None for field in NUMERIC_FIELDS},
-        "numeric_coverage": {field: counts[field] / max(1, len(rows)) for field in NUMERIC_FIELDS},
+        "mse": mse,
+        "numeric_coverage": numeric_coverage,
+        "metric_summary": {
+            "schema_valid_rate": schema_valid_rate,
+            "numeric": {field: {"mse": mse[field], "numeric_coverage": numeric_coverage[field]} for field in NUMERIC_FIELDS},
+        },
     })
     return result
 

@@ -70,7 +70,10 @@ def prepare(config_path: str) -> None:
     write_jsonl(train, output / "train.jsonl")
     write_jsonl(val, output / "val.jsonl")
     write_jsonl(test, output / "test.jsonl")
-    (output / "dataset_info.json").write_text(json.dumps({"num_train": len(train), "num_val": len(val), "num_test": len(test)}, indent=2), encoding="utf-8")
+    (output / "dataset_info.json").write_text(
+        json.dumps({"num_train": len(train), "num_val": len(val), "num_test": len(test), "image_root": str(image_root)}, indent=2),
+        encoding="utf-8",
+    )
 
 
 if __name__ == "__main__":
