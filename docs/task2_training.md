@@ -180,6 +180,19 @@ baseline 每次启动都会从 Task 1 权重重新微调，不是接着上次 Ta
 
 ## 4. 四组推理与评测
 
+两个推理入口都显示已处理图片数、总图片数、速度和预计剩余时间，按每个 batch 完成后更新；Qwen 两阶段全部完成后才计入该批图片进度。
+
+baseline 默认推理 batch size 为 16，Qwen 默认 8，可用 `--batch-size` 单独调整，和训练 batch size 无关。显存不足时降低该值。baseline 的 greedy 支持批量解码；beam 保留原来的逐图片束搜索，主要批量执行视觉编码。
+
+先在验证集快速查看 baseline 效果：
+
+```bash
+python -m experiments.meal_json.infer_baseline --checkpoint results/meal_json/baseline_vit_transformer/best.pt --manifest data/processed/meal_json/val.jsonl --image-root models --output results/meal_json/baseline_vit_transformer/val_predictions_greedy.jsonl --decode greedy --batch-size 16
+python -m experiments.meal_json.evaluate --predictions results/meal_json/baseline_vit_transformer/val_predictions_greedy.jsonl --output results/meal_json/baseline_vit_transformer/val_evaluation_greedy.json
+```
+
+训练参数和解码方式确定后，再按下列步骤评测测试集。
+
 读取数据准备时保存的图片根目录：
 
 ```bash
@@ -194,7 +207,7 @@ python -m experiments.meal_json.infer_baseline \
   --manifest data/processed/meal_json/test.jsonl \
   --image-root "$image_root" \
   --output results/meal_json/baseline_vit_transformer/test_predictions.jsonl \
-  --decode beam --beam-size 3
+  --decode beam --beam-size 3 --batch-size 16
 ```
 
 方法 B/C，共用同一个 Qwen3 Adapter：
@@ -206,6 +219,7 @@ for mode in direct two_stage; do
     --manifest data/processed/meal_json/test.jsonl \
     --image-root "$image_root" \
     --mode "$mode" \
+    --batch-size 8 \
     --output "results/meal_json/Qwen3-VL-4B-Instruct/${mode}.jsonl"
 done
 ```
@@ -218,6 +232,7 @@ python -m experiments.meal_json.infer \
   --manifest data/processed/meal_json/test.jsonl \
   --image-root "$image_root" \
   --mode direct \
+  --batch-size 8 \
   --output results/meal_json/Qwen2.5-VL-3B-Instruct/direct.jsonl
 ```
 
