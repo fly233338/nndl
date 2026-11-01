@@ -85,7 +85,7 @@ def _collate(features, processor):
     for key in ("pixel_values", "image_grid_thw", "video_grid_thw"):
         values = [item[key] for item in features if key in item]
         if values:
-            padded[key] = torch.stack(values)
+            padded[key] = torch.cat(values, dim=0) if key == "pixel_values" else torch.stack(values)
     return padded
 
 
@@ -127,6 +127,7 @@ def train(config_path: str, model_name: str | None = None):
         per_device_train_batch_size=qwen["batch_size"],
         per_device_eval_batch_size=qwen.get("eval_batch_size", qwen["batch_size"]),
         gradient_accumulation_steps=qwen["gradient_accumulation_steps"],
+        dataloader_num_workers=qwen.get("num_workers", 0),
         learning_rate=qwen["learning_rate"],
         bf16=torch.cuda.is_available() and torch.cuda.is_bf16_supported(),
         fp16=torch.cuda.is_available() and not torch.cuda.is_bf16_supported(),

@@ -8,13 +8,13 @@ cd /public/home/rxa-jj-wzk/projects/fyl/lens
 
 ## 0. 新服务器环境
 
-已有可用的 Task 1 环境可以继续使用。新建环境时，下面以 NVIDIA 驱动支持 CUDA 12.4 为例；驱动不匹配时，按 PyTorch 官方安装说明选择对应的 GPU 安装包。
+当前服务器使用 NVIDIA B200，需要支持 Blackwell 的 PyTorch CUDA 构建。下面使用 PyTorch 2.8.0 / CUDA 12.8；已有环境也需要确认 GPU 前向和反向计算可以正常执行。
 
 ```bash
 conda create -n foodlens_task2 python=3.11 -y
 conda activate foodlens_task2
 python -m pip install --upgrade pip
-python -m pip install torch==2.6.0 torchvision==0.21.0 --index-url https://download.pytorch.org/whl/cu124
+python -m pip install torch==2.8.0 torchvision==0.23.0 --index-url https://download.pytorch.org/whl/cu128
 python -m pip install -r requirements.txt "transformers>=4.57,<5"
 nvidia-smi
 python -c "import torch, transformers; print('torch:', torch.__version__); print('transformers:', transformers.__version__); print('CUDA:', torch.cuda.is_available()); print('BF16:', torch.cuda.is_available() and torch.cuda.is_bf16_supported())"
@@ -135,8 +135,9 @@ qwen:
   max_length: 1024
   epochs: 2
   gradient_checkpointing: true
-  batch_size: 1
-  gradient_accumulation_steps: 8
+  batch_size: 8
+  gradient_accumulation_steps: 1
+  num_workers: 4
   learning_rate: 0.00002
   image_size: 448
   lora_r: 16
@@ -146,6 +147,12 @@ qwen:
 ```
 
 上面是现有 `qwen` 配置的参数摘录，不要删掉配置中的 `model_name` 等字段。Qwen 的 1024 是图像 token、提示词和答案的总序列长度，独立于 baseline 的 768；梯度检查点已开启，并在训练时关闭 KV cache。单卡有效 batch size 为 8，支持 BF16 时自动使用 BF16，否则 GPU 上使用 FP16，不量化。
+
+每卡训练和验证 batch size 默认为 8，梯度累积为 1，训练和验证均使用 4 个数据加载进程。每张图片会展开为 direct/items/nutrients 三种指令，因此一轮训练有 7014 个样本。图像 patch 沿第一维拼接，文本按批次补齐。若显存不足，可将 batch size 改为 4、梯度累积改为 2，保持单卡有效 batch size 为 8。
+
+实际提速需对比稳定运行后的样本吞吐和 GPU 利用率；进度条剩余时间可能覆盖两轮训练，不能直接当作一轮耗时。当前 Qwen 入口没有自动续训，修改配置后重新启动会开始新的训练。
+
+两个模型在同一张 GPU 同时训练会共享算力，显存空闲不代表计算资源空闲。若有多张空闲 GPU，可以分别指定 `CUDA_VISIBLE_DEVICES=0` 和 `CUDA_VISIBLE_DEVICES=1`；否则可对比单独运行和同时运行的总耗时。
 
 只训练 Qwen3：
 
