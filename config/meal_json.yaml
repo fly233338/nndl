@@ -6,7 +6,8 @@ image_size: 224
 caption_model: vit_transformer
 vit_path: models/vit-base-patch16-224
 max_length: 768
-batch_size: 4
+batch_size: 16
+num_workers: 4
 epochs: 10
 learning_rate: 0.0001
 caption_model_checkpoint: models/best.pt

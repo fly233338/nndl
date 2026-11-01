@@ -104,7 +104,7 @@ test: 506 rows
 
 ## 3. 开始训练任务二
 
-baseline 配置已写好：`max_length: 768`、`epochs: 10`、`batch_size: 4`、`learning_rate: 0.0001`、`freeze_encoder: false`。768 覆盖已检查的训练和验证标签长度，包含 BOS/EOS。
+baseline 配置已写好：`max_length: 768`、`epochs: 10`、`batch_size: 16`、`num_workers: 4`、`learning_rate: 0.0001`、`freeze_encoder: false`。训练和验证均使用 4 个数据加载进程。768 覆盖已检查的训练和验证标签长度，包含 BOS/EOS。
 
 Task 2 有四组实验，但只训练三次：
 

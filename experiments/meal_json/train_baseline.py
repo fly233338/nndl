@@ -81,8 +81,8 @@ def train(config_path: str, model_name: str | None = None):
     train_set = MealDataset(train_rows, image_root, tokenizer, max_length, image_size, True)
     val_set = MealDataset(val_rows, image_root, tokenizer, max_length, image_size, False)
     collate = lambda batch: _collate(batch, tokenizer.token_to_id["<pad>"])
-    train_loader = torch.utils.data.DataLoader(train_set, batch_size=config.get("batch_size", 4), shuffle=True, collate_fn=collate)
-    val_loader = torch.utils.data.DataLoader(val_set, batch_size=config.get("batch_size", 4), shuffle=False, collate_fn=collate)
+    train_loader = torch.utils.data.DataLoader(train_set, batch_size=config.get("batch_size", 4), shuffle=True, num_workers=config.get("num_workers", 0), collate_fn=collate)
+    val_loader = torch.utils.data.DataLoader(val_set, batch_size=config.get("batch_size", 4), shuffle=False, num_workers=config.get("num_workers", 0), collate_fn=collate)
     from experiments.captioning.models import build_model
     model = build_model(model_name, len(tokenizer.token_to_id), {**config, "max_length": max_length})
     if caption_checkpoint:
