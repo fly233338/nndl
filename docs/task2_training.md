@@ -1,6 +1,10 @@
 # Task 2：Nutrition5k 服务器训练
 
-以下命令在 Linux 服务器的项目根目录执行。数据使用教学云下载的 `annotations.zip` 和 `images.zip`，保留原始 train/val/test 划分和全部标签，不重新随机划分，不修改重量和营养值。
+以下命令在 Linux 服务器的项目根目录 `/public/home/rxa-jj-wzk/projects/fyl/lens` 执行。数据使用教学云下载的 `annotations.zip` 和 `images.zip`，保留原始 train/val/test 划分和全部标签，不重新随机划分，不修改重量和营养值。
+
+```bash
+cd /public/home/rxa-jj-wzk/projects/fyl/lens
+```
 
 ## 0. 新服务器环境
 
@@ -24,18 +28,17 @@ conda install -c conda-forge openjdk=8 -y
 
 ## 1. 放置数据与模型
 
-激活已有的训练环境。将两个压缩包放到项目的 `tmp/` 目录，执行：
+数据和 Task 1 模型统一放在项目的 `models/` 目录。若数据还是压缩包，执行以下命令解压；已经有 `models/annotations/` 和 `models/images/` 则跳过：
 
 ```bash
-mkdir -p data/raw/nutrition5k
-unzip -q tmp/annotations.zip -d data/raw/nutrition5k
-unzip -q tmp/images.zip -d data/raw/nutrition5k
+unzip -n -q models/annotations.zip -d models
+unzip -n -q models/images.zip -d models
 ```
 
 已解压到下列结构则跳过解压：
 
 ```text
-data/raw/nutrition5k/
+models/
   annotations/
     train.jsonl                 # 2338 条
     val.jsonl                   # 414 条
@@ -49,13 +52,26 @@ data/raw/nutrition5k/
 baseline 还需要服务器上已有 Task 1 的模型：
 
 ```text
-results/captioning/vit_transformer/best.pt
+models/best.pt
 models/vit-base-patch16-224/
 ```
 
 `vit_path` 必须指向 Task 1 使用的同一份 Hugging Face ViT backbone。
 
-Qwen 基础模型默认从 Hugging Face 下载，服务器需要能访问模型仓库；无法联网时，提前上传完整模型及 processor 文件，Qwen3 修改 `qwen.model_name`，Qwen2.5 使用 `--model-name` 指定本地模型路径。仅运行 Qwen 不需要 Task 1 的 ViT 和 checkpoint。
+Qwen 模型通过命令行 `--model-name` 指定，使用以下服务器本地路径，目录中需要有完整权重、config、tokenizer 和 processor 文件：
+
+```text
+/public/home/rxa-jj-wzk/models/Qwen3-VL-Instruct/Qwen3-VL-4B-Instruct/
+/public/home/rxa-jj-wzk/models/Qwen2.5-VL/Qwen2.5-VL-3B-Instruct/
+```
+
+`--model-name` 会覆盖配置中的模型名称，不需要改 Qwen 配置文件。仅运行 Qwen 不需要 Task 1 的 ViT 和 checkpoint。
+
+内网服务器训练前启用离线模式：
+
+```bash
+export HF_HUB_OFFLINE=1
+```
 
 ## 2. 转换数据
 
@@ -63,12 +79,12 @@ Qwen 基础模型默认从 Hugging Face 下载，服务器需要能访问模型�
 
 ```yaml
 meal_json:
-  annotations_dir: data/raw/nutrition5k/annotations
-  image_root: data/raw/nutrition5k
+  annotations_dir: models/annotations
+  image_root: models
   output_dir: data/processed/meal_json
 ```
 
-注意 `image_root` 是 `annotations/` 和 `images/` 的共同父目录，因为原始标注的图片路径已经带有 `images/train/...` 前缀。若服务器采用其它存放位置，只修改这两个输入路径。
+注意 `image_root` 是 `annotations/` 和 `images/` 的共同父目录，也就是项目里的 `models/`，因为原始标注的图片路径已经带有 `images/train/...` 前缀。若数据实际解压在其它子目录，只修改这两个输入路径。
 
 ```bash
 python -m scripts.prepare_meal_json --config config/data.yaml
@@ -109,9 +125,7 @@ python -m experiments.meal_json.train_baseline --config config/meal_json.yaml
 
 ```bash
 export CUDA_VISIBLE_DEVICES=0
-python -m experiments.meal_json.train_baseline --config config/meal_json.yaml && \
-python -m experiments.meal_json.train_qwen --config config/meal_json.yaml && \
-python -m experiments.meal_json.train_qwen --config config/meal_json.yaml --model-name Qwen/Qwen2.5-VL-3B-Instruct
+python -m experiments.meal_json.train_baseline --config config/meal_json.yaml && python -m experiments.meal_json.train_qwen --config config/meal_json.yaml --model-name /public/home/rxa-jj-wzk/models/Qwen3-VL-Instruct/Qwen3-VL-4B-Instruct && python -m experiments.meal_json.train_qwen --config config/meal_json.yaml --model-name /public/home/rxa-jj-wzk/models/Qwen2.5-VL/Qwen2.5-VL-3B-Instruct
 ```
 
 Qwen3 和 Qwen2.5 共用 `config/meal_json.yaml` 中的 `qwen` 参数，当前为：
@@ -136,13 +150,13 @@ qwen:
 只训练 Qwen3：
 
 ```bash
-CUDA_VISIBLE_DEVICES=0 python -m experiments.meal_json.train_qwen --config config/meal_json.yaml
+CUDA_VISIBLE_DEVICES=0 python -m experiments.meal_json.train_qwen --config config/meal_json.yaml --model-name /public/home/rxa-jj-wzk/models/Qwen3-VL-Instruct/Qwen3-VL-4B-Instruct
 ```
 
 只训练 Qwen2.5：
 
 ```bash
-CUDA_VISIBLE_DEVICES=0 python -m experiments.meal_json.train_qwen --config config/meal_json.yaml --model-name Qwen/Qwen2.5-VL-3B-Instruct
+CUDA_VISIBLE_DEVICES=0 python -m experiments.meal_json.train_qwen --config config/meal_json.yaml --model-name /public/home/rxa-jj-wzk/models/Qwen2.5-VL/Qwen2.5-VL-3B-Instruct
 ```
 
 正式训练期间不要修改配置文件。baseline 启动会输出加载的兼容参数数量；词表 embedding 和输出层重新初始化。
@@ -215,3 +229,23 @@ done
 ```
 
 比较食物 F1、文本指标与数值误差，最终表格同时列出各字段 MSE、numeric coverage 和整体 schema valid rate。重量一致性仅作为额外观察指标。测试集仅用于最终评测，不用于调整训练参数。
+
+## 5. 内网代码同步的固定基点
+
+后续增量 bundle 始终以 `355ed581a8742faba02dffb4a61e406aa1d39708` 为基点，包含从该提交到最新 `main` 的全部更新。该值是打包基点，不是将当前分支回退到旧提交。服务器需要已导入包含该提交的首次完整 bundle。
+
+本地提交修改后，在项目根目录执行 PowerShell 命令：
+
+```powershell
+git bundle create ..\foodlens-update.bundle 355ed581a8742faba02dffb4a61e406aa1d39708..main
+git bundle verify ..\foodlens-update.bundle
+```
+
+将增量包传到服务器项目目录的 `foodlens-update.bundle`，然后执行：
+
+```bash
+cd /public/home/rxa-jj-wzk/projects/fyl/lens
+git fetch ./foodlens-update.bundle refs/heads/main:refs/remotes/offline/main
+git merge --ff-only refs/remotes/offline/main
+python -m scripts.prepare_meal_json --config config/data.yaml
+```

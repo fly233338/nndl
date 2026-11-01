@@ -6,6 +6,6 @@ caption:
   output_dir: "data/processed/food500cap"
   val_ratio: 0.1
 meal_json:
-  annotations_dir: "data/raw/nutrition5k/annotations"
-  image_root: "data/raw/nutrition5k"
+  annotations_dir: "models/annotations"
+  image_root: "models"
   output_dir: "data/processed/meal_json"
