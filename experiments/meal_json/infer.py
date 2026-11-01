@@ -10,6 +10,7 @@ from PIL import Image
 from tqdm import tqdm
 from transformers import AutoModelForImageTextToText, AutoProcessor
 
+from utils.config import load_yaml
 from utils.jsonl import read_jsonl, write_jsonl
 from .prompts import direct_prompt, items_prompt, nutrients_prompt
 from .schema import parse_and_validate
@@ -61,8 +62,19 @@ def _prompt(mode, items=None):
 
 
 @torch.no_grad()
-def _predict_batch(model, processor, device, images, mode="direct", items=None, max_new_tokens=256):
+def _predict_batch(
+    model,
+    processor,
+    device,
+    images,
+    mode="direct",
+    items=None,
+    max_new_tokens=768,
+    image_size=448,
+):
     """批量生成文本；第二阶段的 items 与图片按相同顺序对应。"""
+    # 与训练使用相同的图片尺寸，两阶段均使用这份输入。
+    images = [image.resize((image_size, image_size)) for image in images]
     texts = []
     for index, image in enumerate(images):
         prompt = _prompt(mode, items[index] if items is not None else None)
@@ -94,7 +106,8 @@ def _predict_loaded(
     image_path,
     mode="direct",
     items=None,
-    max_new_tokens=256,
+    max_new_tokens=768,
+    image_size=448,
 ):
     """复用批量生成逻辑处理单张图片。"""
     with Image.open(image_path) as image:
@@ -108,6 +121,7 @@ def _predict_loaded(
         mode,
         [items] if items is not None else None,
         max_new_tokens,
+        image_size,
     )[0]
 
 
@@ -117,10 +131,21 @@ def qwen_predict(
     mode: str = "direct",
     items: dict | None = None,
     base_model_name: str | None = None,
+    config_path: str = "config/meal_json.yaml",
 ) -> str:
     """单图推理入口，返回模型生成的原始文本。"""
     model, processor, device = load_qwen_adapter(adapter_dir, base_model_name)
-    return _predict_loaded(model, processor, device, image_path, mode, items)
+    qwen = load_yaml(config_path)["qwen"]
+    return _predict_loaded(
+        model,
+        processor,
+        device,
+        image_path,
+        mode,
+        items,
+        max_new_tokens=qwen.get("max_new_tokens", 768),
+        image_size=qwen.get("image_size", 448),
+    )
 
 
 def _set_error(record, exc):
@@ -137,11 +162,13 @@ def infer_manifest(
     mode: str = "direct",
     base_model_name: str | None = None,
     batch_size: int = 8,
+    config_path: str = "config/meal_json.yaml",
 ):
     """批量执行直接或两阶段推理，保留清单顺序和失败记录。"""
     if batch_size < 1:
         raise ValueError("batch_size must be positive")
 
+    qwen = load_yaml(config_path)["qwen"]
     model, processor, device = load_qwen_adapter(adapter_dir, base_model_name)
     rows = list(read_jsonl(manifest))
     records = []
@@ -177,6 +204,8 @@ def infer_manifest(
                         device,
                         images,
                         "items" if mode == "two_stage" else mode,
+                        max_new_tokens=qwen.get("max_new_tokens", 768),
+                        image_size=qwen.get("image_size", 448),
                     )
                     next_images, next_records, next_items = [], [], []
                     for image, record, raw in zip(images, ready, outputs):
@@ -207,6 +236,8 @@ def infer_manifest(
                             next_images,
                             "nutrients",
                             next_items,
+                            max_new_tokens=qwen.get("max_new_tokens", 768),
+                            image_size=qwen.get("image_size", 448),
                         )
                         for record, stage1, raw in zip(next_records, next_items, outputs):
                             record["stage2_raw"] = raw
@@ -237,6 +268,7 @@ def infer_manifest(
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
+    parser.add_argument("--config", default="config/meal_json.yaml")
     parser.add_argument("--adapter-dir", required=True)
     parser.add_argument("--base-model-name")
     parser.add_argument("--manifest", required=True)
@@ -253,4 +285,5 @@ if __name__ == "__main__":
         args.mode,
         args.base_model_name,
         args.batch_size,
+        args.config,
     )

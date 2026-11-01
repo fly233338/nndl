@@ -1,5 +1,7 @@
 # Task 2：Nutrition5k 服务器训练
 
+调参配置和批量训练、推理、算分命令见 [Task 2 调参命令](task2_tuning.md)。默认配置新训练写入 `results/meal_json/default/`，调参结果写入 `results/meal_json/tuning/`；原有结果仍保留在 `results/meal_json/`。
+
 以下命令在 Linux 服务器的项目根目录 `/public/home/rxa-jj-wzk/projects/fyl/lens` 执行。数据使用教学云下载的 `annotations.zip` 和 `images.zip`，保留原始 train/val/test 划分和全部标签，不重新随机划分，不修改重量和营养值。
 
 ```bash
@@ -104,7 +106,7 @@ test: 506 rows
 
 ## 3. 开始训练任务二
 
-baseline 配置已写好：`max_length: 768`、`epochs: 10`、`batch_size: 16`、`num_workers: 4`、`learning_rate: 0.0001`、`freeze_encoder: false`。训练和验证均使用 4 个数据加载进程。768 覆盖已检查的训练和验证标签长度，包含 BOS/EOS。
+baseline 配置已写好：`max_length: 768`、`epochs: 10`、`batch_size: 16`、`num_workers: 4`、`learning_rate: 0.00005`、`freeze_encoder: false`。训练和验证均使用 4 个数据加载进程。768 覆盖已检查的训练和验证标签长度，包含 BOS/EOS。
 
 Task 2 有四组实验，但只训练三次：
 
@@ -133,12 +135,13 @@ Qwen3 和 Qwen2.5 共用 `config/meal_json.yaml` 中的 `qwen` 参数，当前�
 ```yaml
 qwen:
   max_length: 1024
+  max_new_tokens: 768
   epochs: 2
   gradient_checkpointing: true
   batch_size: 8
   gradient_accumulation_steps: 1
   num_workers: 4
-  learning_rate: 0.00002
+  learning_rate: 0.00001
   image_size: 448
   lora_r: 16
   lora_alpha: 32
@@ -171,9 +174,9 @@ CUDA_VISIBLE_DEVICES=0 python -m experiments.meal_json.train_qwen --config confi
 模型输出：
 
 ```text
-results/meal_json/baseline_vit_transformer/best.pt
-results/meal_json/Qwen3-VL-4B-Instruct/shared_adapter/
-results/meal_json/Qwen2.5-VL-3B-Instruct/shared_adapter/
+results/meal_json/default/baseline_vit_transformer/best.pt
+results/meal_json/default/Qwen3-VL-4B-Instruct/shared_adapter/
+results/meal_json/default/Qwen2.5-VL-3B-Instruct/shared_adapter/
 ```
 
 baseline 每次启动都会从 Task 1 权重重新微调，不是接着上次 Task 2 checkpoint 训练。
@@ -182,13 +185,15 @@ baseline 每次启动都会从 Task 1 权重重新微调，不是接着上次 Ta
 
 两个推理入口都显示已处理图片数、总图片数、速度和预计剩余时间，按每个 batch 完成后更新；Qwen 两阶段全部完成后才计入该批图片进度。
 
+Qwen 推理从 `--config`（默认 `config/meal_json.yaml`）读取 `qwen.image_size: 448` 和 `qwen.max_new_tokens: 768`，直接生成、两阶段和单图入口均使用相同尺寸；两阶段每个阶段分别最多生成 768 个 token。
+
 baseline 默认推理 batch size 为 16，Qwen 默认 8，可用 `--batch-size` 单独调整，和训练 batch size 无关。显存不足时降低该值。baseline 的 greedy 支持批量解码；beam 保留原来的逐图片束搜索，主要批量执行视觉编码。
 
 先在验证集快速查看 baseline 效果：
 
 ```bash
-python -m experiments.meal_json.infer_baseline --checkpoint results/meal_json/baseline_vit_transformer/best.pt --manifest data/processed/meal_json/val.jsonl --image-root models --output results/meal_json/baseline_vit_transformer/val_predictions_greedy.jsonl --decode greedy --batch-size 16
-python -m experiments.meal_json.evaluate --predictions results/meal_json/baseline_vit_transformer/val_predictions_greedy.jsonl --output results/meal_json/baseline_vit_transformer/val_evaluation_greedy.json
+python -m experiments.meal_json.infer_baseline --checkpoint results/meal_json/default/baseline_vit_transformer/best.pt --manifest data/processed/meal_json/val.jsonl --image-root models --output results/meal_json/default/baseline_vit_transformer/val_predictions_greedy.jsonl --decode greedy --batch-size 16
+python -m experiments.meal_json.evaluate --predictions results/meal_json/default/baseline_vit_transformer/val_predictions_greedy.jsonl --output results/meal_json/default/baseline_vit_transformer/val_evaluation_greedy.json
 ```
 
 训练参数和解码方式确定后，再按下列步骤评测测试集。
@@ -203,10 +208,10 @@ image_root=$(python -c 'import json; print(json.load(open("data/processed/meal_j
 
 ```bash
 python -m experiments.meal_json.infer_baseline \
-  --checkpoint results/meal_json/baseline_vit_transformer/best.pt \
+  --checkpoint results/meal_json/default/baseline_vit_transformer/best.pt \
   --manifest data/processed/meal_json/test.jsonl \
   --image-root "$image_root" \
-  --output results/meal_json/baseline_vit_transformer/test_predictions.jsonl \
+  --output results/meal_json/default/baseline_vit_transformer/test_predictions.jsonl \
   --decode beam --beam-size 3 --batch-size 16
 ```
 
@@ -215,12 +220,12 @@ python -m experiments.meal_json.infer_baseline \
 ```bash
 for mode in direct two_stage; do
   python -m experiments.meal_json.infer \
-    --adapter-dir results/meal_json/Qwen3-VL-4B-Instruct/shared_adapter \
+    --adapter-dir results/meal_json/default/Qwen3-VL-4B-Instruct/shared_adapter \
     --manifest data/processed/meal_json/test.jsonl \
     --image-root "$image_root" \
     --mode "$mode" \
     --batch-size 8 \
-    --output "results/meal_json/Qwen3-VL-4B-Instruct/${mode}.jsonl"
+    --output "results/meal_json/default/Qwen3-VL-4B-Instruct/${mode}.jsonl"
 done
 ```
 
@@ -228,22 +233,22 @@ done
 
 ```bash
 python -m experiments.meal_json.infer \
-  --adapter-dir results/meal_json/Qwen2.5-VL-3B-Instruct/shared_adapter \
+  --adapter-dir results/meal_json/default/Qwen2.5-VL-3B-Instruct/shared_adapter \
   --manifest data/processed/meal_json/test.jsonl \
   --image-root "$image_root" \
   --mode direct \
   --batch-size 8 \
-  --output results/meal_json/Qwen2.5-VL-3B-Instruct/direct.jsonl
+  --output results/meal_json/default/Qwen2.5-VL-3B-Instruct/direct.jsonl
 ```
 
 分别评测四份预测：
 
 ```bash
 for predictions in \
-  results/meal_json/baseline_vit_transformer/test_predictions.jsonl \
-  results/meal_json/Qwen3-VL-4B-Instruct/direct.jsonl \
-  results/meal_json/Qwen3-VL-4B-Instruct/two_stage.jsonl \
-  results/meal_json/Qwen2.5-VL-3B-Instruct/direct.jsonl; do
+  results/meal_json/default/baseline_vit_transformer/test_predictions.jsonl \
+  results/meal_json/default/Qwen3-VL-4B-Instruct/direct.jsonl \
+  results/meal_json/default/Qwen3-VL-4B-Instruct/two_stage.jsonl \
+  results/meal_json/default/Qwen2.5-VL-3B-Instruct/direct.jsonl; do
   python -m experiments.meal_json.evaluate \
     --predictions "$predictions" \
     --output "${predictions%.jsonl}_evaluation.json"
