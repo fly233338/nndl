@@ -65,7 +65,8 @@ def structured_metrics(rows):
                 weights = [item.get("weight_g") for item in parsed_label["items"] if isinstance(item, dict)]
                 if len(weights) == len(parsed_label["items"]) and all(isinstance(weight, (int, float)) and not isinstance(weight, bool) and math.isfinite(float(weight)) for weight in weights):
                     consistency_total += 1
-                    if "weight_total_inconsistent" not in result.get("errors", []):
+                    total = sum(weights)
+                    if abs(total - float(parsed_label["total_weight_g"])) <= max(2.0, 0.05 * max(1.0, total)):
                         consistency_valid += 1
         else:
             parsed_label = {"items": []}

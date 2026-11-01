@@ -33,13 +33,6 @@ def validate_meal(value: Any) -> tuple[bool, list[str], dict[str, Any] | None]:
             errors.append(f"{field}_invalid")
     extras = set(value) - set(REQUIRED_FIELDS)
     errors.extend(f"extra:{field}" for field in sorted(extras))
-    if isinstance(items, list) and _number(value.get("total_weight_g")):
-        weights = [float(item["weight_g"]) for item in items if isinstance(item, dict) and _number(item.get("weight_g"))]
-        if len(weights) == len(items):
-            total = sum(weights)
-            expected = float(value["total_weight_g"])
-            if abs(total - expected) > max(2.0, 0.05 * max(1.0, total)):
-                errors.append("weight_total_inconsistent")
     return not errors, errors, value if isinstance(value, dict) else None
 
 

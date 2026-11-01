@@ -5,12 +5,16 @@ output_dir: results/meal_json
 image_size: 224
 caption_model: vit_transformer
 vit_path: models/vit-base-patch16-224
-max_length: 512
+max_length: 768
+batch_size: 4
+epochs: 10
+learning_rate: 0.0001
 caption_model_checkpoint: results/captioning/vit_transformer/best.pt
 freeze_encoder: false
 text_projection_template: "A meal contains {items}."
 qwen:
   model_name: Qwen/Qwen3-VL-4B-Instruct
+  max_length: 1024
   dtype: bfloat16
   load_in_4bit: false
   lora_r: 16
@@ -18,10 +22,10 @@ qwen:
   lora_dropout: 0.05
   target_modules: [q_proj, k_proj, v_proj, o_proj]
   learning_rate: 0.00002
-  epochs: 3
+  epochs: 2
   batch_size: 1
   gradient_accumulation_steps: 8
   image_size: 448
-  gradient_checkpointing: false
+  gradient_checkpointing: true
 comparison_model:
   model_name: Qwen/Qwen2.5-VL-3B-Instruct

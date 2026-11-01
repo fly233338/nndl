@@ -6,20 +6,6 @@ caption:
   output_dir: "data/processed/food500cap"
   val_ratio: 0.1
 meal_json:
-  source_path: ""
-  image_root: ""
+  annotations_dir: "data/raw/nutrition5k/annotations"
+  image_root: "data/raw/nutrition5k"
   output_dir: "data/processed/meal_json"
-  split_seed: 2026
-  val_ratio: 0.1
-  test_ratio: 0.1
-  fields:
-    image: image
-    image_id: image_id
-    items: items
-    item_name: name
-    item_weight: weight_g
-    total_weight: total_weight_g
-    calories: total_calories_kcal
-    protein: protein_g
-    fat: fat_g
-    carbohydrate: carbohydrate_g

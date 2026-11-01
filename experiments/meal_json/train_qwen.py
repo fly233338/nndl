@@ -100,6 +100,7 @@ def train(config_path: str, model_name: str | None = None):
     lora = LoraConfig(r=qwen["lora_r"], lora_alpha=qwen["lora_alpha"], lora_dropout=qwen["lora_dropout"], target_modules=qwen["target_modules"], task_type=TaskType.CAUSAL_LM)
     model = get_peft_model(model, lora)
     if qwen.get("gradient_checkpointing", False):
+        model.config.use_cache = False
         model.gradient_checkpointing_enable()
         model.enable_input_require_grads()
     model.print_trainable_parameters()
@@ -115,8 +116,9 @@ def train(config_path: str, model_name: str | None = None):
     rows = [{**row, "image_path": str(image_root / row["image_path"])} for row in rows]
     val_rows = [{**row, "image_path": str(image_root / row["image_path"])} for row in val_rows]
     tasks = ["direct", "items", "nutrients"]
-    dataset = QwenDataset(rows, processor, tasks, int(config.get("max_length", 256)), int(qwen.get("image_size", config.get("image_size", 448))))
-    eval_dataset = QwenDataset(val_rows, processor, tasks, int(config.get("max_length", 256)), int(qwen.get("image_size", config.get("image_size", 448))))
+    max_length = int(qwen.get("max_length", 1024))
+    dataset = QwenDataset(rows, processor, tasks, max_length, int(qwen.get("image_size", config.get("image_size", 448))))
+    eval_dataset = QwenDataset(val_rows, processor, tasks, max_length, int(qwen.get("image_size", config.get("image_size", 448))))
     output = Path(config.get("output_dir", "results/meal_json")) / Path(model_name).name / "shared_adapter"
     output.mkdir(parents=True, exist_ok=True)
     training_args = TrainingArguments(
