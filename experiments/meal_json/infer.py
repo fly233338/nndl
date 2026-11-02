@@ -1,4 +1,4 @@
-"""加载 Qwen LoRA Adapter，支持批量直接生成和两阶段生成。"""
+"""加载 Qwen LoRA Adapter，支持直接生成、食材两阶段和草稿复核。"""
 
 import argparse
 import json
@@ -12,7 +12,7 @@ from transformers import AutoModelForImageTextToText, AutoProcessor
 
 from utils.config import load_yaml
 from utils.jsonl import read_jsonl, write_jsonl
-from .prompts import direct_prompt, items_prompt, nutrients_prompt
+from .prompts import direct_prompt, items_prompt, nutrients_prompt, review_prompt
 from .schema import parse_and_validate
 
 
@@ -58,6 +58,9 @@ def _prompt(mode, items=None):
     if mode == "nutrients":
         return nutrients_prompt(items or {})
 
+    if mode == "review":
+        return review_prompt(items)
+
     return direct_prompt()
 
 
@@ -72,7 +75,7 @@ def _predict_batch(
     max_new_tokens=768,
     image_size=448,
 ):
-    """批量生成文本；第二阶段的 items 与图片按相同顺序对应。"""
+    """批量生成文本；第二阶段的条件与图片按相同顺序对应。"""
     # 与训练使用相同的图片尺寸，两阶段均使用这份输入。
     images = [image.resize((image_size, image_size)) for image in images]
     texts = []
@@ -136,7 +139,7 @@ def qwen_predict(
     """单图推理入口，返回模型生成的原始文本。"""
     model, processor, device = load_qwen_adapter(adapter_dir, base_model_name)
     qwen = load_yaml(config_path)["qwen"]
-    return _predict_loaded(
+    raw = _predict_loaded(
         model,
         processor,
         device,
@@ -146,6 +149,60 @@ def qwen_predict(
         max_new_tokens=qwen.get("max_new_tokens", 768),
         image_size=qwen.get("image_size", 448),
     )
+    if mode != "draft_review":
+        return raw
+
+    draft = parse_and_validate(extract_json(raw))
+    record = {"raw_output": raw, "parsed": draft, "draft_validation": draft}
+    try:
+        reviewed = _predict_loaded(
+            model,
+            processor,
+            device,
+            image_path,
+            "review",
+            {"draft": raw, "checks": _review_checks(draft)},
+            max_new_tokens=qwen.get("max_new_tokens", 768),
+            image_size=qwen.get("image_size", 448),
+        )
+    except Exception:
+        if draft["valid"]:
+            return raw
+        raise
+
+    _apply_review(record, reviewed)
+    return record["raw_output"]
+
+
+def _review_checks(draft):
+    """只检查草稿本身，不读取真实标签；数值关系仅作为复核提示。"""
+    checks = list(draft["errors"])
+    if not draft["valid"]:
+        return checks
+
+    meal = draft["parsed"]
+    names = [item["name"].strip().lower() for item in meal["items"]]
+    if len(names) != len(set(names)):
+        checks.append("Duplicate food names; check whether they describe the same portion.")
+    if any(item["weight_g"] > meal["total_weight_g"] for item in meal["items"]):
+        checks.append("An item weight exceeds total_weight_g; check the portion estimates.")
+    if (
+        sum(meal[field] for field in ("protein_g", "fat_g", "carbohydrate_g"))
+        > meal["total_weight_g"]
+    ):
+        checks.append("Macronutrient mass exceeds total_weight_g; check units and estimates.")
+    return checks
+
+
+def _apply_review(record, raw):
+    """保留复核原文；复核无效时仅回退到有效草稿，失败记录仍保留。"""
+    reviewed = parse_and_validate(extract_json(raw))
+    record["review_validation"] = reviewed
+    record["review_error"] = None if reviewed["valid"] else "; ".join(reviewed["errors"])
+    record["review_fallback"] = not reviewed["valid"] and record["draft_validation"]["valid"]
+    if not record["review_fallback"]:
+        record["raw_output"] = raw
+        record["parsed"] = reviewed
 
 
 def _set_error(record, exc):
@@ -164,7 +221,7 @@ def infer_manifest(
     batch_size: int = 8,
     config_path: str = "config/meal_json.yaml",
 ):
-    """批量执行直接或两阶段推理，保留清单顺序和失败记录。"""
+    """批量执行所选推理模式，保留清单顺序、阶段输出和失败记录。"""
     if batch_size < 1:
         raise ValueError("batch_size must be positive")
 
@@ -210,6 +267,18 @@ def infer_manifest(
                     next_images, next_records, next_items = [], [], []
                     for image, record, raw in zip(images, ready, outputs):
                         record["raw_output"] = raw
+                        if mode == "draft_review":
+                            draft = parse_and_validate(extract_json(raw))
+                            record["stage1_raw"] = raw
+                            record["parsed"] = draft
+                            record["draft_validation"] = draft
+                            record["review_checks"] = _review_checks(draft)
+                            record["review_fallback"] = False
+                            record["review_error"] = None
+                            next_images.append(image)
+                            next_records.append(record)
+                            next_items.append({"draft": raw, "checks": record["review_checks"]})
+                            continue
                         if mode != "two_stage":
                             record["parsed"] = parse_and_validate(extract_json(raw))
                             continue
@@ -227,20 +296,23 @@ def infer_manifest(
                         except Exception as exc:
                             _set_error(record, exc)
 
-                    # 只保留第一阶段解析成功的图片，并同步保留对应食材。
+                    # 食材两阶段只处理可解析食材；草稿复核也允许修复无效草稿。
                     if next_images:
                         outputs = _predict_batch(
                             model,
                             processor,
                             device,
                             next_images,
-                            "nutrients",
+                            "review" if mode == "draft_review" else "nutrients",
                             next_items,
                             max_new_tokens=qwen.get("max_new_tokens", 768),
                             image_size=qwen.get("image_size", 448),
                         )
                         for record, stage1, raw in zip(next_records, next_items, outputs):
                             record["stage2_raw"] = raw
+                            if mode == "draft_review":
+                                _apply_review(record, raw)
+                                continue
                             try:
                                 stage2_json = extract_json(raw)
                                 if not stage2_json:
@@ -256,7 +328,10 @@ def infer_manifest(
                                 _set_error(record, exc)
             except Exception as exc:
                 for record in ready:
-                    if record["parsed"] is None:
+                    if mode == "draft_review" and record["stage1_raw"] is not None:
+                        record["review_error"] = str(exc)
+                        record["review_fallback"] = record["draft_validation"]["valid"]
+                    elif record["parsed"] is None:
                         _set_error(record, exc)
 
             records.extend(batch_records)
@@ -273,10 +348,19 @@ if __name__ == "__main__":
     parser.add_argument("--base-model-name")
     parser.add_argument("--manifest", required=True)
     parser.add_argument("--image-root", required=True)
-    parser.add_argument("--output", default="results/meal_json/predictions.jsonl")
-    parser.add_argument("--mode", choices=["direct", "two_stage"], default="direct")
+    parser.add_argument("--output")
+    parser.add_argument("--mode", choices=["direct", "two_stage", "draft_review"], default="direct")
     parser.add_argument("--batch-size", type=int, default=8)
     args = parser.parse_args()
+    if args.output is None:
+        if args.mode == "draft_review":
+            args.output = str(
+                Path(args.adapter_dir).parent
+                / "draft_review"
+                / f"{Path(args.manifest).stem}_predictions.jsonl"
+            )
+        else:
+            args.output = "results/meal_json/predictions.jsonl"
     infer_manifest(
         args.adapter_dir,
         args.manifest,
