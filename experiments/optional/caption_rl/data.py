@@ -8,6 +8,7 @@ from PIL import Image
 
 from experiments.task1_captioning.datasets import image_transform
 from experiments.task1_captioning.models import build_model
+from experiments.task1_captioning.models.checkpoint import align_vit_state_dict
 from experiments.task1_captioning.tokenizer import Vocabulary
 from utils.jsonl import read_jsonl
 
@@ -50,7 +51,13 @@ def load_model(path, config, device):
     model_config["freeze_encoder"] = True
     vocab = Vocabulary(state["vocab"])
     model = build_model(state["model_name"], len(vocab.token_to_id), model_config)
-    model.load_state_dict(state["model"])
+    weights, renamed_count = align_vit_state_dict(state["model"], model.state_dict())
+    # 保持严格加载，缺失、多余或形状不匹配的参数都会报错。
+    model.load_state_dict(weights, strict=True)
+    print(
+        f"Loaded complete checkpoint: {len(weights)} tensors, "
+        f"renamed {renamed_count} ViT parameters; no missing or unexpected keys.",
+    )
     model.encoder.requires_grad_(False)
     model.to(device).eval()
     return model, vocab, state, model_config

@@ -6,6 +6,8 @@
 
 需要任务一数据清单、图片、ViT backbone 和 `models/best.pt`。路径与训练参数在 `config/optional/caption_rl.yaml`。
 
+加载时自动兼容新旧 Transformers 的 ViT 参数名，并严格检查全部权重。成功后打印 `Loaded complete checkpoint`；参数缺失或形状不符仍会停止，不会跳过未加载的权重。
+
 ```bash
 python -m experiments.optional.caption_rl.reward
 python -m experiments.optional.caption_rl.train
