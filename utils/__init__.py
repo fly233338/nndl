@@ -1,1 +1,1 @@
-"""Small shared utilities for FoodLens experiments."""
+"""FoodLens 实验共用的轻量工具。"""

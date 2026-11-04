@@ -1,0 +1,61 @@
+base: weight.yaml
+output_dir: results/nutrition_agent
+api:
+  model: qwen3.8-27b
+  model_env: AGENT_MODEL
+  base_url_env: OPENAI_BASE_URL
+  api_key_env: OPENAI_API_KEY
+  timeout: 60
+  max_retries: 2
+  temperature: 0.0
+  max_tokens: 8192
+  extra_body: {}
+agent:
+  max_reviews: 1
+  crop_max_size: 1024
+  system_prompt: |
+    You are the FoodLens nutrition agent. Inspect only the supplied RGB image.
+    Use English normalized dish names and categories. A mixed cooked dish is one
+    finished-dish item; independent foods are separate items. Describe ingredients,
+    cooking method, raw/cooked state, sauce, container, servings, relative portion
+    level. Do not estimate total mass yourself or infer mass from crop pixels.
+    First call lookup_nutrition with your observations. Then call estimate_weight,
+    with no arguments. The weight tool sees only the original RGB image and returns
+    a total mass independently of your observations or the nutrition database.
+    For requires_choice=false use default_food_id. Relative weights must be positive.
+    In calculate, select candidates using the original image and cooking state.
+    Use standard portions and visual proportions only to allocate the predicted mass.
+    After weight estimation either call calculate or request ONE review (crop_image
+    for a visual ambiguity, or lookup_nutrition to correct food identity/cooking state).
+    A review must be likely to change the database match. After reviewing, call
+    calculate with the final candidate IDs and relative weights. Do not add oil or
+    sauce separately when already included in a cooked dish. This version uses
+    finished-dish matching; do not reconstruct a mixed dish from raw ingredients.
+    Tools own all final numbers. Never invent final calories or override tool mass.
+    A review updates food identity/density/allocation only; total mass stays fixed.
+nutrition:
+  top_k: 5
+  density_spread_threshold: 0.3
+  density_floor: 1.0
+  portion_preference: [cup, medium, piece, serving]
+  use_calibration: true
+  calibration_strength: 0.25
+  calibration_min_samples: 5
+  group_field: image_id
+cache:
+  nutrition_train_path: data/processed/nutrition_agent/train_nutrition_v2.jsonl
+resources:
+  table_path: data/processed/nutrition_agent/usda.jsonl
+  metadata_path: data/processed/nutrition_agent/usda_metadata.json
+  mapping_path: config/optional/nutrition_mapping.yaml
+  calibration_path: results/nutrition_agent/nutrition_calibration.json
+  download_timeout: 60
+  sources:
+    - name: SR Legacy
+      version: April 2018
+      path: data/raw/usda/FoodData_Central_sr_legacy_food_json_2018-04.zip
+      url: https://fdc.nal.usda.gov/fdc-datasets/FoodData_Central_sr_legacy_food_json_2018-04.zip
+    - name: FNDDS
+      version: 2021-2023 (October 2024)
+      path: data/raw/usda/FoodData_Central_survey_food_json_2024-10-31.zip
+      url: https://fdc.nal.usda.gov/fdc-datasets/FoodData_Central_survey_food_json_2024-10-31.zip

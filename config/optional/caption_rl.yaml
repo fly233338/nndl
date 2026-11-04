@@ -1,0 +1,24 @@
+seed: 2026
+data_dir: data/processed/food500cap
+image_root: ""
+checkpoint: results/captioning/vit_transformer/best.pt
+vit_path: models/vit-base-patch16-224
+output_dir: results/caption_rl/vit_transformer_scst
+reward_cache: data/processed/food500cap/scst_train_reward.json
+device: auto
+batch_size: 8
+num_workers: 2
+epochs: 5
+learning_rate: 0.00001
+weight_decay: 0.0
+grad_clip: 5.0
+patience: 3
+# Image size and max_length are inherited from the CE checkpoint.
+validation_decode: beam
+beam_size: 3
+reward:
+  n: 4
+  sigma: 6.0
+evaluation:
+  decodes: [greedy, beam]
+  metrics: [BLEU-1, BLEU-2, BLEU-3, BLEU-4, METEOR, ROUGE-L, CIDEr-D, SPICE]

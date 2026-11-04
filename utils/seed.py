@@ -1,4 +1,7 @@
+"""固定 Python、NumPy 和 PyTorch 的随机种子。"""
+
 import random
+
 import numpy as np
 import torch
 

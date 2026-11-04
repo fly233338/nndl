@@ -1,127 +1,47 @@
-# Task 2 参数消融命令（Linux 服务器）
+# 任务二参数消融命令
 
-新增的完整草稿＋定向复核模式与独立输出目录见 [草稿复核推理、算分命令](task2_draft_review.md)，复用已有 Adapter，无需重训。
+在 Linux 项目根目录执行。配置位于 `config/task2_meal_json/meal_json_tuning/`：ViT 为学习率 `{1e-5, 5e-5}` × 轮数 `{10, 20}`；Qwen 为学习率 `{1e-5, 5e-5, 1e-4}` × 轮数 `{1, 2, 3}`。各组独立训练，按验证损失保存检查点。
 
-## 1. 公共设置
-
-```bash
-cd /public/home/rxa-jj-wzk/projects/fyl/lens
-conda activate lens
-export HF_HUB_OFFLINE=1
-qwen3=/public/home/rxa-jj-wzk/models/Qwen3-VL-Instruct/Qwen3-VL-4B-Instruct
-qwen25=/public/home/rxa-jj-wzk/models/Qwen2.5-VL/Qwen2.5-VL-3B-Instruct
-```
-
-Qwen 统一：训练长度 1024，训练/推理图片 448×448，每阶段生成上限 768；batch size 8，梯度累积 1，LoRA r=16、alpha=32，梯度检查点开启。ViT：长度 768，batch size 16，workers 4。
-
-## 2. 配置与输出
-
-配置位于 `config/meal_json_tuning/`，均继承 `config/meal_json.yaml`。
-
-| 配置文件名 | 学习率 | epoch 上限 |
-|---|---:|---:|
-| `vit_lr1e-5_ep10.yaml` | 1e-5 | 10 |
-| `vit_lr1e-5_ep20.yaml` | 1e-5 | 20 |
-| `vit_lr5e-5_ep10.yaml` | 5e-5 | 10 |
-| `vit_lr5e-5_ep20.yaml` | 5e-5 | 20 |
-| `qwen_lr1e-5_ep1.yaml` | 1e-5 | 1 |
-| `qwen_lr1e-5_ep2.yaml` | 1e-5 | 2 |
-| `qwen_lr1e-5_ep3.yaml` | 1e-5 | 3 |
-| `qwen_lr5e-5_ep1.yaml` | 5e-5 | 1 |
-| `qwen_lr5e-5_ep2.yaml` | 5e-5 | 2 |
-| `qwen_lr5e-5_ep3.yaml` | 5e-5 | 3 |
-| `qwen_lr1e-4_ep1.yaml` | 1e-4 | 1 |
-| `qwen_lr1e-4_ep2.yaml` | 1e-4 | 2 |
-| `qwen_lr1e-4_ep3.yaml` | 1e-4 | 3 |
-
-ViT 4 组，Qwen3 和 Qwen2.5 各 9 组，共 22 次训练。每组从相同初始权重独立训练；最终模型按最低验证损失保存，可能早于最后一个 epoch。全部配置统一在 test 集上推理、算分，比较学习率与训练轮数的影响。
-
-```text
-results/meal_json/tuning/vit_lr5e-5_ep20/baseline_vit_transformer/best.pt
-results/meal_json/tuning/qwen_lr1e-5_ep2/Qwen3-VL-4B-Instruct/shared_adapter/
-results/meal_json/tuning/qwen_lr1e-5_ep2/Qwen2.5-VL-3B-Instruct/shared_adapter/
-```
-
-原有结果仍在 `results/meal_json/`；默认配置的新训练写入 `results/meal_json/default/`。以下消融命令均写入 `results/meal_json/tuning/`。重复运行同一组会使用同一输出目录，不自动续训。
-
-## 3. 批量训练（按需选择，每条命令内部串行）
-
-### ViT：4 组
+## 1. ViT：训练与评测
 
 ```bash
-for config in config/meal_json_tuning/vit_*.yaml; do python -m experiments.meal_json.train_baseline --config "$config" || break; done
+for config in config/task2_meal_json/meal_json_tuning/vit_*.yaml; do
+  python -m experiments.task2_meal_json.train_baseline --config "$config" || break
+done
+for config in config/task2_meal_json/meal_json_tuning/vit_*.yaml; do
+  run=$(basename "$config" .yaml)
+  out="results/meal_json/tuning/$run/baseline_vit_transformer"
+  for decode in greedy beam; do
+    python -m experiments.task2_meal_json.infer_baseline --checkpoint "$out/best.pt" --manifest data/processed/meal_json/test.jsonl --image-root models --decode "$decode" --beam-size 3 --output "$out/test_$decode.jsonl" || break 2
+    python -m experiments.task2_meal_json.evaluate --predictions "$out/test_$decode.jsonl" --output "$out/test_${decode}_metrics.json" || break 2
+  done
+done
 ```
 
-### Qwen3：9 组
+## 2. Qwen：训练与评测
+
+按要运行的模型设置下面三个变量，`base_model` 改为实际模型目录：
+
+| 模型 | `model` | `modes` |
+|---|---|---|
+| Qwen3 | `Qwen3-VL-4B-Instruct` | `direct two_stage` |
+| Qwen2.5 | `Qwen2.5-VL-3B-Instruct` | `direct` |
 
 ```bash
-for config in config/meal_json_tuning/qwen_*.yaml; do python -m experiments.meal_json.train_qwen --config "$config" --model-name /public/home/rxa-jj-wzk/models/Qwen3-VL-Instruct/Qwen3-VL-4B-Instruct || break; done
+model=Qwen3-VL-4B-Instruct
+base_model=models/Qwen3-VL-4B-Instruct
+modes="direct two_stage"
+for config in config/task2_meal_json/meal_json_tuning/qwen_*.yaml; do
+  python -m experiments.task2_meal_json.train_qwen --config "$config" --model-name "$base_model" || break
+done
+for config in config/task2_meal_json/meal_json_tuning/qwen_*.yaml; do
+  run=$(basename "$config" .yaml)
+  out="results/meal_json/tuning/$run/$model"
+  for mode in $modes; do
+    python -m experiments.task2_meal_json.infer --config "$config" --adapter-dir "$out/shared_adapter" --base-model-name "$base_model" --manifest data/processed/meal_json/test.jsonl --image-root models --mode "$mode" --output "$out/test_$mode.jsonl" || break 2
+    python -m experiments.task2_meal_json.evaluate --predictions "$out/test_$mode.jsonl" --output "$out/test_${mode}_metrics.json" || break 2
+  done
+done
 ```
 
-### Qwen2.5：9 组
-
-```bash
-for config in config/meal_json_tuning/qwen_*.yaml; do python -m experiments.meal_json.train_qwen --config "$config" --model-name /public/home/rxa-jj-wzk/models/Qwen2.5-VL/Qwen2.5-VL-3B-Instruct || break; done
-```
-
-## 4. 依次评测（每组推理后立即算分）
-
-命令已固定使用 test 集，依次评测全部配置。需先准备好 Java 8 和 CoreNLP；任一步失败即停止当前循环。
-
-### ViT：greedy + beam=3
-
-```bash
-for config in config/meal_json_tuning/vit_*.yaml; do run=$(basename "$config" .yaml); out="results/meal_json/tuning/$run/baseline_vit_transformer"; for decode in greedy beam; do python -m experiments.meal_json.infer_baseline --checkpoint "$out/best.pt" --manifest "data/processed/meal_json/test.jsonl" --image-root models --decode "$decode" --beam-size 3 --batch-size 16 --output "$out/test_${decode}.jsonl" && python -m experiments.meal_json.evaluate --predictions "$out/test_${decode}.jsonl" --output "$out/test_${decode}_metrics.json" || break 2; done; done
-```
-
-### Qwen3 单阶段：direct，9 组
-
-```bash
-for config in config/meal_json_tuning/qwen_*.yaml; do run=$(basename "$config" .yaml); out="results/meal_json/tuning/$run/Qwen3-VL-4B-Instruct"; python -m experiments.meal_json.infer --config "$config" --adapter-dir "$out/shared_adapter" --base-model-name /public/home/rxa-jj-wzk/models/Qwen3-VL-Instruct/Qwen3-VL-4B-Instruct --manifest data/processed/meal_json/test.jsonl --image-root models --mode direct --batch-size 8 --output "$out/test_direct.jsonl" && python -m experiments.meal_json.evaluate --predictions "$out/test_direct.jsonl" --output "$out/test_direct_metrics.json" || break; done
-```
-
-### Qwen3 两阶段：two_stage，9 组（与单阶段共用 Adapter）
-
-```bash
-for config in config/meal_json_tuning/qwen_*.yaml; do run=$(basename "$config" .yaml); out="results/meal_json/tuning/$run/Qwen3-VL-4B-Instruct"; python -m experiments.meal_json.infer --config "$config" --adapter-dir "$out/shared_adapter" --base-model-name /public/home/rxa-jj-wzk/models/Qwen3-VL-Instruct/Qwen3-VL-4B-Instruct --manifest data/processed/meal_json/test.jsonl --image-root models --mode two_stage --batch-size 8 --output "$out/test_two_stage.jsonl" && python -m experiments.meal_json.evaluate --predictions "$out/test_two_stage.jsonl" --output "$out/test_two_stage_metrics.json" || break; done
-```
-
-### Qwen2.5：direct
-
-```bash
-for config in config/meal_json_tuning/qwen_*.yaml; do run=$(basename "$config" .yaml); out="results/meal_json/tuning/$run/Qwen2.5-VL-3B-Instruct"; python -m experiments.meal_json.infer --config "$config" --adapter-dir "$out/shared_adapter" --base-model-name /public/home/rxa-jj-wzk/models/Qwen2.5-VL/Qwen2.5-VL-3B-Instruct --manifest "data/processed/meal_json/test.jsonl" --image-root models --mode direct --batch-size 8 --output "$out/test_direct.jsonl" && python -m experiments.meal_json.evaluate --predictions "$out/test_direct.jsonl" --output "$out/test_direct_metrics.json" || break; done
-```
-
-## 5. 已有预测，只依次算分（需先准备好 Java 8、CoreNLP）
-
-```bash
-for predictions in results/meal_json/tuning/vit_*/baseline_vit_transformer/"test_greedy.jsonl" results/meal_json/tuning/vit_*/baseline_vit_transformer/"test_beam.jsonl" results/meal_json/tuning/qwen_*/Qwen3-VL-4B-Instruct/"test_direct.jsonl" results/meal_json/tuning/qwen_*/Qwen3-VL-4B-Instruct/"test_two_stage.jsonl" results/meal_json/tuning/qwen_*/Qwen2.5-VL-3B-Instruct/"test_direct.jsonl"; do python -m experiments.meal_json.evaluate --predictions "$predictions" --output "${predictions%.jsonl}_metrics.json" || break; done
-```
-
-## 6. 只跑指定一组（修改 run 即可）
-
-### ViT
-
-```bash
-run=vit_lr5e-5_ep20
-python -m experiments.meal_json.train_baseline --config "config/meal_json_tuning/$run.yaml"
-python -m experiments.meal_json.infer_baseline --checkpoint "results/meal_json/tuning/$run/baseline_vit_transformer/best.pt" --manifest "data/processed/meal_json/test.jsonl" --image-root models --decode greedy --batch-size 16 --output "results/meal_json/tuning/$run/baseline_vit_transformer/test_greedy.jsonl"
-python -m experiments.meal_json.evaluate --predictions "results/meal_json/tuning/$run/baseline_vit_transformer/test_greedy.jsonl" --output "results/meal_json/tuning/$run/baseline_vit_transformer/test_greedy_metrics.json"
-```
-
-### Qwen3
-
-```bash
-run=qwen_lr1e-5_ep2
-python -m experiments.meal_json.train_qwen --config "config/meal_json_tuning/$run.yaml" --model-name "$qwen3"
-python -m experiments.meal_json.infer --config "config/meal_json_tuning/$run.yaml" --adapter-dir "results/meal_json/tuning/$run/Qwen3-VL-4B-Instruct/shared_adapter" --base-model-name "$qwen3" --manifest "data/processed/meal_json/test.jsonl" --image-root models --mode direct --batch-size 8 --output "results/meal_json/tuning/$run/Qwen3-VL-4B-Instruct/test_direct.jsonl"
-python -m experiments.meal_json.evaluate --predictions "results/meal_json/tuning/$run/Qwen3-VL-4B-Instruct/test_direct.jsonl" --output "results/meal_json/tuning/$run/Qwen3-VL-4B-Instruct/test_direct_metrics.json"
-```
-
-Qwen3 两阶段将 `--mode direct` 和输出文件名中的 `direct` 都换成 `two_stage`。Qwen2.5 将上述命令中的 `$qwen3` 换成 `$qwen25`，目录名换成 `Qwen2.5-VL-3B-Instruct`。
-
-## 7. 单组 test 复测（已有模型，无需重训）
-
-设置需要复测的 `run`，复用第 6 节推理、算分命令，跳过训练。消融表列出全部配置的学习率、epoch 上限、实际保存的 epoch、`item_micro_f1`、`schema_valid_rate`、各字段 `mse` 和 `numeric_coverage`。
-
-旧 Qwen Adapter 可以直接按新推理设置重新生成结果，无需重训；旧的 256 token / 原图尺寸预测不用于与本轮结果直接比较。
+已有模型时跳过训练循环；已有预测时仅运行对应的 `evaluate`。需要继续调参时先用 val，冻结后在 test 统一报告各组结果。汇总食物 F1、Schema 有效率、五项 MSE 和数值覆盖率。

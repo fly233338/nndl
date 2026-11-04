@@ -1,0 +1,33 @@
+# FoodLens
+
+NN&DL 课程设计：两个必选任务为食物图像描述和膳食 JSON 生成，三个选做方向为强化学习优化、LLM-as-Judge 和营养估计 Agent。
+
+## 代码目录
+
+```text
+experiments/
+  task1_captioning/       # 五种描述模型、训练、推理、评测和数据准备
+  task2_meal_json/        # JSON baseline、Qwen LoRA 和结构化评测
+  optional/
+    caption_rl/          # CIDEr-D SCST 微调与 CE 配对评测
+    llm_judge/           # 图文评分与一致性分析
+    nutrition_agent/     # 营养库、独立视觉估重和工具调用循环
+config/
+  data.yaml              # 课程数据路径
+  task1_captioning/      # 任务一参数
+  task2_meal_json/       # 任务二参数和消融配置
+  optional/             # RL、Judge 和营养 Agent 参数
+utils/                   # 配置、文件、JSONL、指标和随机种子
+```
+
+## 运行入口
+
+- [环境与数据准备](task2_training.md)
+- [必选任务运行命令](experiment_commands.md)
+- [任务一首次下载](task1_commands.md)
+- [任务二参数消融](task2_tuning.md)
+- [任务二草稿复核](task2_draft_review.md)
+- [RL、Judge 和任务三运行命令](optional_server_commands.md)
+- [任务三方法与实现说明](task3_nutrition_agent.md)
+
+命令从项目根目录执行，路径和实验参数集中在配置中。各实验保持独立，数据、模型权重、缓存和实验结果不提交到仓库。结果需同时报告预测误差、结构有效率和数值覆盖率。

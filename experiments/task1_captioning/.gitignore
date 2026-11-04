@@ -1,0 +1,3 @@
+# Keep model source visible while the root models directory stays ignored.
+!models/
+!models/*.py

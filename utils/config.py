@@ -1,3 +1,5 @@
+"""读取 YAML 配置，并递归合并相对路径指定的基础配置。"""
+
 from pathlib import Path
 from typing import Any
 
@@ -15,6 +17,7 @@ def _merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
 
 
 def load_yaml(path: str | Path) -> dict[str, Any]:
+    """相对当前配置解析 base，并递归覆盖嵌套字典。"""
     path = Path(path)
     with path.open("r", encoding="utf-8") as stream:
         config = yaml.safe_load(stream) or {}
@@ -23,10 +26,3 @@ def load_yaml(path: str | Path) -> dict[str, Any]:
         base = load_yaml(path.parent / base_path)
         config = _merge(base, config)
     return config
-
-
-def dump_json(data: Any, path: str | Path) -> None:
-    import json
-    target = Path(path)
-    target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")

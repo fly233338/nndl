@@ -1,3 +1,5 @@
+"""以 UTF-8 编码逐行读写 JSONL 文件。"""
+
 import json
 from pathlib import Path
 from typing import Any, Iterable, Iterator
