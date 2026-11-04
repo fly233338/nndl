@@ -4,7 +4,7 @@
 
 ## 1. RL：CIDEr-D 策略梯度微调
 
-需要任务一数据清单、图片、ViT backbone 和 `results/captioning/vit_transformer/best.pt`。路径与训练参数在 `config/optional/caption_rl.yaml`。
+需要任务一数据清单、图片、ViT backbone 和 `models/best.pt`。路径与训练参数在 `config/optional/caption_rl.yaml`。
 
 ```bash
 python -m experiments.optional.caption_rl.reward

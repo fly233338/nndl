@@ -1,7 +1,7 @@
 seed: 2026
 data_dir: data/processed/food500cap
 image_root: ""
-checkpoint: results/captioning/vit_transformer/best.pt
+checkpoint: models/best.pt
 vit_path: models/vit-base-patch16-224
 output_dir: results/caption_rl/vit_transformer_scst
 reward_cache: data/processed/food500cap/scst_train_reward.json
