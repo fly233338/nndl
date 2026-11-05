@@ -47,15 +47,15 @@ python -m experiments.optional.llm_judge.analyze --records results/llm_judge/vit
 
 ## 3. 任务三：营养 Agent
 
-实现说明见 [任务三方案](task3_nutrition_agent.md)。先确认 `config/data.yaml` 中课程标注与图片路径正确；重量配置为 `config/optional/weight.yaml`，Agent 配置为 `config/optional/nutrition_agent.yaml`。
+默认关闭营养校准，直接使用 USDA，不需要语义缓存或类别统计。重量配置为 `config/optional/weight.yaml`，Agent 配置为 `config/optional/nutrition_agent.yaml`；实现说明见 [任务三方案](task3_nutrition_agent.md)。
+
+先放好 `models/dinov2-small/`、课程数据 `data/processed/meal_json/{train,val,test}.jsonl` 及图片，以及 `data/processed/nutrition_agent/usda.jsonl`、`usda_metadata.json`。已有任务二处理数据可直接复用。未生成清单时运行 `python -m experiments.task2_meal_json.prepare_meal_json`；只有原始 USDA ZIP 时运行 `python -m experiments.optional.nutrition_agent.prepare_resources`。
 
 ### 准备数据和独立重量模型
 
-已有处理数据或本地 DINOv2 模型可跳过对应命令。服务器无法联网时，在联网机器下载后复制完整模型目录。
+已有匹配当前 DINOv2 的 `results/nutrition_agent/weight/ridge.joblib` 时可跳过训练；关闭营养校准不能替代重量模型训练。
 
 ```bash
-python -m experiments.task2_meal_json.prepare_meal_json
-hf download facebook/dinov2-small --local-dir models/dinov2-small
 python -m experiments.optional.nutrition_agent.prepare_cache --kind visual --split train
 python -m experiments.optional.nutrition_agent.prepare_cache --kind visual --split val
 python -m experiments.optional.nutrition_agent.weight --action train
@@ -64,20 +64,17 @@ python -m experiments.optional.nutrition_agent.weight --action evaluate --split 
 
 重量工具不需要 LLM。多视角数据须用同一菜品的共享分组字段，避免训练和评测重叠。
 
-### 准备营养库并连接模型
+### 连接模型
 
-已有 `usda.jsonl` 和 metadata 可跳过营养库准备。模型服务必须支持 RGB 输入和 tool calling；设置准确的服务模型 ID。
+模型服务必须支持 RGB 输入和 tool calling。下面复用 Judge 的地址、密钥和模型选择；服务只有一个模型时自动获取 ID，有多个时先设置 `JUDGE_MODEL`。
 
 ```bash
-python -m experiments.optional.nutrition_agent.prepare_resources --download
-export OPENAI_BASE_URL=http://127.0.0.1:8005/v1
-export OPENAI_API_KEY=EMPTY
-export AGENT_MODEL="实际部署的模型ID"
-python -m experiments.optional.nutrition_agent.prepare_cache --kind nutrition --split train
-python -m experiments.optional.nutrition_agent.calibrate_nutrition
+export OPENAI_BASE_URL="${JUDGE_BASE_URL:-http://127.0.0.1:8005/v1}"
+export OPENAI_API_KEY="${JUDGE_API_KEY:-EMPTY}"
+export AGENT_MODEL="$(python -c 'from utils.config import load_yaml; from experiments.optional.llm_judge.client import connect; c,m=connect(load_yaml("config/optional/llm_judge.yaml")); print(m); c.close()')"
 ```
 
-最后两步是默认开启的训练集营养校准。只使用原始 USDA 时，在 Agent 配置设置 `nutrition.use_calibration: false` 并跳过这两步。离线服务器可将固定版本 USDA 压缩包放到配置路径，再省略 `--download`。
+可选的营养校准不属于本流程；需要时按 [任务三方案](task3_nutrition_agent.md) 单独开启。
 
 ### 单图检查与开发集对照
 
@@ -95,7 +92,7 @@ done
 python -m experiments.optional.nutrition_agent.evaluate --predictions "results/nutrition_agent/$split/direct/predictions.jsonl" "results/nutrition_agent/$split/agent/predictions.jsonl" --manifest "data/processed/meal_json/$split.jsonl" --output "results/nutrition_agent/$split/comparison.json"
 ```
 
-冻结重量模型、营养库、校准、映射、Prompt 和配置后，将 `split=val` 改为 `split=test` 重复上面整段，完成最终测试。需要单独报告重量工具的测试表现时运行：
+冻结重量模型、营养库、映射、Prompt 和配置后，将 `split=val` 改为 `split=test` 重复上面整段，完成最终测试。需要单独报告重量工具的测试表现时运行：
 
 ```bash
 python -m experiments.optional.nutrition_agent.prepare_cache --kind visual --split test

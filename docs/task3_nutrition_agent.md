@@ -75,7 +75,7 @@ python -m experiments.optional.nutrition_agent.tools --food "米饭" --method bo
 
 混合菜优先匹配成品菜，独立食物分别查表。明确冲突的生熟、烹饪和酱汁状态被排除，未知状态保留近似匹配标识。低密度差异采用最匹配候选，高差异由 LLM 看图选择。没有合适成品菜时显式失败并要求完善映射；本版不做原料重建或另加已计入成品菜的油/酱汁。标准份量仅供 LLM 分配各项重量，不输入重量模型。
 
-类别营养密度统计仍是 Nutrition DB 的独立功能。它使用单独的语义缓存，不读取 DINOv2、Ridge 或纯视觉缓存：
+当前默认 `nutrition.use_calibration: false`，直接使用原始 USDA，跳过下面的语义缓存和类别统计。类别营养密度统计是可选的独立功能；需要时先将该选项设为 true，再执行下面的命令。它不读取 DINOv2、Ridge 或纯视觉缓存：
 
 ```powershell
 $env:OPENAI_BASE_URL = "你的 OpenAI 兼容接口地址"

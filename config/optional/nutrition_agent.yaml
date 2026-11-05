@@ -38,7 +38,7 @@ nutrition:
   density_spread_threshold: 0.3
   density_floor: 1.0
   portion_preference: [cup, medium, piece, serving]
-  use_calibration: true
+  use_calibration: false
   calibration_strength: 0.25
   calibration_min_samples: 5
   group_field: image_id
