@@ -78,4 +78,17 @@ python -m experiments.task2_meal_json.infer --adapter-dir results/meal_json/defa
 python -m experiments.task2_meal_json.evaluate --predictions results/meal_json/default/Qwen2.5-VL-3B-Instruct/test_direct.jsonl --output results/meal_json/default/Qwen2.5-VL-3B-Instruct/test_direct_metrics.json
 ```
 
+Qwen zero-shot 对照：不训练、不加载 Adapter，使用原始 Qwen3/Qwen2.5 模型。提示词、图片尺寸、解码及评测流程与上面的 LoRA 实验相同；结果单独保存在配置的 `zero_shot_output_dir`。
+
+```bash
+for base_model in "$qwen3" "$qwen25"; do
+  model=$(basename "$base_model")
+  out="results/meal_json/zero_shot/$model/direct/test_predictions"
+  python -m experiments.task2_meal_json.infer --zero-shot --base-model-name "$base_model" --manifest data/processed/meal_json/test.jsonl --image-root models --mode direct --output "$out.jsonl" || break
+  python -m experiments.task2_meal_json.evaluate --predictions "$out.jsonl" --output "${out}_metrics.json" || break
+done
+```
+
+`--zero-shot` 与 `--adapter-dir` 互斥；不指定 `--output` 时按原始模型名称、推理模式和划分自动保存到独立目录。已有任务二汇总未包含这组结果，需实际推理和评测后再补表。
+
 参数消融见 [消融命令](task2_tuning.md)，草稿复核见 [复核命令](task2_draft_review.md)。汇总时保留食物 F1、各字段 MSE、数值覆盖率和 Schema 有效率。

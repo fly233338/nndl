@@ -1,11 +1,10 @@
-"""加载 Qwen LoRA Adapter，支持直接生成、食材两阶段和草稿复核。"""
+"""加载原始 Qwen 或 LoRA Adapter，复用相同的膳食 JSON 推理流程。"""
 
 import argparse
 import json
 from pathlib import Path
 
 import torch
-from peft import PeftModel
 from PIL import Image
 from tqdm import tqdm
 from transformers import AutoModelForImageTextToText, AutoProcessor
@@ -23,15 +22,23 @@ def extract_json(text: str) -> str:
     return text[start : end + 1] if start >= 0 and end > start else ""
 
 
-def load_qwen_adapter(adapter_dir: str, base_model_name: str | None = None):
-    """加载基础模型、Adapter 和 processor，并切换为生成所需的左侧填充。"""
-    adapter_path = Path(adapter_dir)
-    adapter_config = json.loads((adapter_path / "adapter_config.json").read_text(encoding="utf-8"))
-    base_model_name = base_model_name or adapter_config.get("base_model_name_or_path")
-    if not base_model_name:
-        raise ValueError("base model name is missing from adapter_config.json")
+def load_qwen_model(base_model_name: str | None = None, adapter_dir: str | None = None):
+    """无 Adapter 时只加载原始模型；有 Adapter 时沿用已有的微调模型加载方式。"""
+    if adapter_dir is not None:
+        adapter_path = Path(adapter_dir)
+        adapter_config = json.loads(
+            (adapter_path / "adapter_config.json").read_text(encoding="utf-8"),
+        )
+        base_model_name = base_model_name or adapter_config.get("base_model_name_or_path")
 
-    processor = AutoProcessor.from_pretrained(adapter_dir, trust_remote_code=True)
+    if not base_model_name:
+        raise ValueError("Supply a base model name or an Adapter with base_model_name_or_path")
+
+    if adapter_dir is None and (Path(base_model_name) / "adapter_config.json").is_file():
+        raise ValueError("Zero-shot requires the original base model directory, not an Adapter")
+
+    processor_source = adapter_dir if adapter_dir is not None else base_model_name
+    processor = AutoProcessor.from_pretrained(processor_source, trust_remote_code=True)
     # 左侧填充保证每条输入的末尾都是有效 token。
     processor.tokenizer.padding_side = "left"
     device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -47,9 +54,20 @@ def load_qwen_adapter(adapter_dir: str, base_model_name: str | None = None):
         torch_dtype=dtype,
         trust_remote_code=True,
     )
-    model = PeftModel.from_pretrained(base, adapter_dir).to(device).eval()
+    if adapter_dir is not None:
+        from peft import PeftModel
+
+        model = PeftModel.from_pretrained(base, adapter_dir)
+    else:
+        model = base
+    model.to(device).eval()
 
     return model, processor, device
+
+
+def load_qwen_adapter(adapter_dir: str, base_model_name: str | None = None):
+    """保留已有 Adapter 加载接口。"""
+    return load_qwen_model(base_model_name=base_model_name, adapter_dir=adapter_dir)
 
 
 def _prompt(mode, items=None):
@@ -130,16 +148,18 @@ def _predict_loaded(
 
 
 def qwen_predict(
-    adapter_dir: str,
+    adapter_dir: str | None,
     image_path: str,
     mode: str = "direct",
     items: dict | None = None,
     base_model_name: str | None = None,
     config_path: str = "config/task2_meal_json/meal_json.yaml",
 ) -> str:
-    """单图推理入口，返回模型生成的原始文本。"""
-    model, processor, device = load_qwen_adapter(adapter_dir, base_model_name)
+    """单图推理返回原始文本；adapter_dir 为 None 时使用原始模型。"""
     qwen = load_yaml(config_path)["qwen"]
+    if adapter_dir is None:
+        base_model_name = base_model_name or qwen["model_name"]
+    model, processor, device = load_qwen_model(base_model_name, adapter_dir)
     raw = _predict_loaded(
         model,
         processor,
@@ -213,7 +233,7 @@ def _set_error(record, exc):
 
 
 def infer_manifest(
-    adapter_dir: str,
+    adapter_dir: str | None,
     manifest: str,
     image_root: str,
     output: str,
@@ -222,12 +242,14 @@ def infer_manifest(
     batch_size: int = 8,
     config_path: str = "config/task2_meal_json/meal_json.yaml",
 ):
-    """批量执行所选推理模式，保留清单顺序、阶段输出和失败记录。"""
+    """批量执行所选模式；无 Adapter 时执行 zero-shot，标签只用于后续评测。"""
     if batch_size < 1:
         raise ValueError("batch_size must be positive")
 
     qwen = load_yaml(config_path)["qwen"]
-    model, processor, device = load_qwen_adapter(adapter_dir, base_model_name)
+    if adapter_dir is None:
+        base_model_name = base_model_name or qwen["model_name"]
+    model, processor, device = load_qwen_model(base_model_name, adapter_dir)
     rows = list(read_jsonl(manifest))
     records = []
 
@@ -345,7 +367,13 @@ def infer_manifest(
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", default="config/task2_meal_json/meal_json.yaml")
-    parser.add_argument("--adapter-dir", required=True)
+    model_source = parser.add_mutually_exclusive_group(required=True)
+    model_source.add_argument("--adapter-dir")
+    model_source.add_argument(
+        "--zero-shot",
+        action="store_true",
+        help="Use the original Qwen model without loading a LoRA Adapter",
+    )
     parser.add_argument("--base-model-name")
     parser.add_argument("--manifest", required=True)
     parser.add_argument("--image-root", required=True)
@@ -353,6 +381,16 @@ if __name__ == "__main__":
     parser.add_argument("--mode", choices=["direct", "two_stage", "draft_review"], default="direct")
     parser.add_argument("--batch-size", type=int, default=8)
     args = parser.parse_args()
+    if args.zero_shot:
+        config = load_yaml(args.config)
+        args.base_model_name = args.base_model_name or config["qwen"]["model_name"]
+        if args.output is None:
+            args.output = str(
+                Path(config["zero_shot_output_dir"])
+                / Path(args.base_model_name).name
+                / args.mode
+                / f"{Path(args.manifest).stem}_predictions.jsonl",
+            )
     if args.output is None:
         if args.mode == "draft_review":
             args.output = str(

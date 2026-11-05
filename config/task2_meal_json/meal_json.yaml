@@ -2,6 +2,7 @@ seed: 2026
 data_dir: data/processed/meal_json
 image_root: ""
 output_dir: results/meal_json/default
+zero_shot_output_dir: results/meal_json/zero_shot
 image_size: 224
 caption_model: vit_transformer
 vit_path: models/vit-base-patch16-224

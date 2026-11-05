@@ -29,6 +29,8 @@ models/vit-base-patch16-224/
 
 原始标注含 `dish_id`、`image` 和 `target`；`image` 已带 `images/` 前缀，因此 `config/data.yaml` 的 `meal_json.image_root` 默认为 `models`。baseline 需要任务一的 `models/best.pt`；Qwen 需要完整的本地模型、tokenizer 和 processor 目录。
 
+Qwen zero-shot 只需原始模型目录，不需要 Adapter 或任务一权重。推理入口使用 `--zero-shot --base-model-name 模型目录`，其余设置和评分复用 LoRA 流程；运行命令见 [实验运行命令](experiment_commands.md)。
+
 ```bash
 python -m experiments.task2_meal_json.prepare_meal_json
 ```
