@@ -38,6 +38,8 @@ def infer(config_path, mode="agent", image=None, manifest=None, output=None, lim
         )
         if config["nutrition"]["use_calibration"]:
             required.append(config["resources"]["calibration_path"])
+        if config.get("food_names", {}).get("enabled", False):
+            required.append(config["food_names"]["vocabulary_path"])
     if mode == "agent":
         required.append(config["weight"]["artifact_path"])
     missing = [path for path in required if not Path(path).is_file()]

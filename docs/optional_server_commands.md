@@ -100,3 +100,5 @@ python -m experiments.optional.nutrition_agent.weight --action evaluate --split 
 ```
 
 完整对照结果在 `results/nutrition_agent/{val,test}/comparison.json`，独立重量结果在 `results/nutrition_agent/weight/`。同时报告 F1、五项 MSE/MAE、数值覆盖率和失败率。
+
+训练集名称候选规范化是独立可选实验，不需要微调模型，且不改变原 Agent 输出目录或评分规则，见 [训练集名称查表](task3_food_names.md)。
