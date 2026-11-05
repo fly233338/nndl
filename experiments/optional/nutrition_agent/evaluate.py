@@ -85,8 +85,11 @@ def evaluate_records(records, manifest=None):
                     - prediction["total_weight_g"],
                 ),
             )
+    micro_f1, macro_f1 = item_scores(item_gold, item_predicted)
     result = {
         "samples": len(rows),
+        "item_micro_f1": micro_f1,
+        "item_macro_f1": macro_f1,
         "schema_valid_rate": valid / len(rows),
         "failure_rate": failures / len(rows),
         "missing_prediction_count": missing,
@@ -104,9 +107,6 @@ def evaluate_records(records, manifest=None):
         "mean_model_requests": _mean([row.get("model_requests") for row in rows]),
         "mean_tool_calls": _mean([row.get("tool_call_count") for row in rows]),
     }
-    result["item_micro_f1"], result["item_macro_f1"] = (
-        item_scores(item_gold, item_predicted) if item_gold else (None, None)
-    )
     for field in ("prompt_tokens", "completion_tokens", "total_tokens"):
         values = [(row.get("usage") or {}).get(field) for row in rows]
         result[f"mean_{field}"] = _mean(values)
