@@ -4,7 +4,6 @@ import base64
 import json
 import os
 import time
-from copy import deepcopy
 from io import BytesIO
 
 from PIL import Image
@@ -12,7 +11,6 @@ from PIL import Image
 from experiments.task2_meal_json.schema import canonical_json, parse_and_validate
 from utils.files import sha256_file
 
-from .food_names import FoodNameLookup
 from .tools import NutritionDB, crop_image, normalize_weights, number
 
 MODES = ("direct", "agent")
@@ -118,23 +116,6 @@ CROP = declaration(
 )
 
 
-def calculation_tool(with_food_names=False):
-    """仅在名称规范化实验中增加候选名称选择，原有工具声明保持不变。"""
-    if not with_food_names:
-        return CALCULATE
-    tool = deepcopy(CALCULATE)
-    item_schema = tool["function"]["parameters"]["properties"]["items"]["items"]
-    item_schema["properties"]["canonical_name"] = {
-        "type": ["string", "null"],
-        "description": (
-            "Choose a name from this item's food_name_candidates only if it names the same food. "
-            "Use null when no candidate is equivalent; the original observed name is then kept."
-        ),
-    }
-    item_schema["required"].append("canonical_name")
-    return tool
-
-
 def image_message(image):
     buffer = BytesIO()
     image.convert("RGB").save(buffer, format="PNG")
@@ -175,58 +156,27 @@ def validate_observation(value):
     return value
 
 
-def lookup_observation(db, observation, food_names=None):
-    """保留营养候选，仅在启用时附加训练名称候选。"""
+def lookup_observation(db, observation):
     lookups = []
     for item in observation["items"]:
-        name_candidates = []
-        if food_names is not None:
-            name_candidates = food_names.lookup(item["name"], item["category"])
-        try:
-            lookup = db.lookup(
-                item["name"],
-                item["ingredients"],
-                item["cooking_method"],
-                item["food_state"],
-                item["sauce"],
-                item["mixed_dish"],
-            )
-        except ValueError as error:
-            if not name_candidates:
-                raise
-            # 先返回名称候选，让模型使用原有复核机会纠正识别，不擅自查替代食品。
-            lookup = {
-                "candidates": [],
-                "requires_choice": True,
-                "default_food_id": None,
-                "lookup_error": str(error),
-            }
-        if food_names is not None:
-            lookup = {
-                **lookup,
-                "food_name_candidates": name_candidates,
-            }
+        lookup = db.lookup(
+            item["name"],
+            item["ingredients"],
+            item["cooking_method"],
+            item["food_state"],
+            item["sauce"],
+            item["mixed_dish"],
+        )
         lookups.append(lookup)
     return lookups
 
 
 def select_items(observation, lookups, items):
-    """按观察顺序选择食品和可选的规范名称，低密度差异项使用默认食品。"""
+    """按观察顺序选择候选，低差异项固定使用默认匹配。"""
     if len(items) != len(observation["items"]):
         raise ValueError("Select exactly one candidate per observed item, preserving order")
     selected = []
     for item, lookup, selection in zip(observation["items"], lookups, items):
-        name = item["name"]
-        if "food_name_candidates" in lookup:
-            canonical_name = selection.get("canonical_name")
-            if canonical_name is not None:
-                canonical_name = canonical_name.strip().lower()
-                allowed_names = {entry["name"] for entry in lookup["food_name_candidates"]}
-                if canonical_name not in allowed_names:
-                    raise ValueError(
-                        "Select canonical_name from this item's candidates or use null"
-                    )
-                name = canonical_name
         food_id = selection["food_id"] if lookup["requires_choice"] else lookup["default_food_id"]
         candidate = next((c for c in lookup["candidates"] if c["food_id"] == food_id), None)
         if candidate is None:
@@ -236,7 +186,7 @@ def select_items(observation, lookups, items):
         selected.append(
             {
                 "food_id": food_id,
-                "name": name,
+                "name": item["name"],
                 "category": item["category"],
                 "calibration_key": "|".join(
                     item[k].strip().lower()
@@ -320,20 +270,6 @@ def run_agent(image_path, config, mode="agent", observations_only=False):
                 "Numbers must be finite and nonnegative."
             )
         )
-        food_names = None
-        if mode == "agent" and config.get("food_names", {}).get("enabled", False):
-            food_names = FoodNameLookup(config)
-            prompt += (
-                " The nutrition lookup also returns food_name_candidates from training labels. "
-                "Use English observed names for lookup. In calculate, choose canonical_name "
-                "only when a candidate means the same food at the observed granularity. "
-                "Training frequency is not evidence that a food is visible. "
-                "Do not replace a mixed dish by one ingredient or force an unseen food into "
-                "the vocabulary. Use null when uncertain; preserve the original name. "
-                "If lookup_error is returned, use the existing review to call lookup_nutrition "
-                "with corrected whole-meal observations before calculate."
-            )
-        calculate = calculation_tool(food_names is not None)
         with Image.open(image_path) as image:
             messages = [
                 {"role": "system", "content": prompt},
@@ -351,9 +287,9 @@ def run_agent(image_path, config, mode="agent", observations_only=False):
             elif stage == "weight":
                 declarations = [WEIGHT]
             elif reviews < min(1, config["agent"]["max_reviews"]):
-                declarations = [calculate, CROP, LOOKUP]
+                declarations = [CALCULATE, CROP, LOOKUP]
             else:
-                declarations = [calculate]
+                declarations = [CALCULATE]
             arguments = {
                 "model": os.environ.get(api.get("model_env", "")) or api["model"],
                 "messages": messages,
@@ -401,7 +337,7 @@ def run_agent(image_path, config, mode="agent", observations_only=False):
                 if stage == "decide":
                     reviews += 1
                 observation = validate_observation(values)
-                lookups = lookup_observation(db, observation, food_names)
+                lookups = lookup_observation(db, observation)
                 result = {"items": lookups}
                 stage = "weight" if weight is None else "decide"
             elif name == "estimate_weight":

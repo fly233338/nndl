@@ -1,7 +1,0 @@
-base: nutrition_agent.yaml
-output_dir: results/nutrition_agent/name_normalized
-food_names:
-  enabled: true
-  vocabulary_path: data/processed/nutrition_agent/train_food_names.json
-  top_k: 8
-  min_match_score: 0.3
