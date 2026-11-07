@@ -1,5 +1,6 @@
 AGENTS.md
 /docs/*
+!/docs/开题报告.md
 !/docs/task2_training.md
 !/docs/experiment_commands.md
 !/docs/task2_tuning.md
