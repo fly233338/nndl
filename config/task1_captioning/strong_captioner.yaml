@@ -13,9 +13,9 @@ data:
 
 encoder:
   model_id: google/siglip2-giant-opt-patch16-384
-  model_path: null
+  model_path: models/siglip2-giant-opt-patch16-384
   revision: main
-  local_files_only: false
+  local_files_only: true
 
 preprocessing:
   image_size: 384

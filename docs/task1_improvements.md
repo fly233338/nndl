@@ -80,13 +80,14 @@ LoRA 默认关闭，仅作为独立实验：在视觉末 8 层的 Q/V 投影注�
 
 ### 环境和权重
 
-依赖沿用 `requirements.txt`，无需新增包。数据准备及 Java 指标环境见 [实验运行命令](experiment_commands.md)。默认配置会在首次实际运行时加载远程视觉权重，也可以事先下载完整检查点：
+训练依赖沿用 `requirements.txt`。数据准备及 Java 指标环境见 [实验运行命令](experiment_commands.md)。默认从项目的 `models/siglip2-giant-opt-patch16-384` 加载本地权重，且 `encoder.local_files_only: true`。先通过 ModelScope 下载完整检查点：
 
 ```powershell
-hf download google/siglip2-giant-opt-patch16-384 --local-dir models/siglip2-giant-opt-patch16-384
+python -m pip install -U modelscope
+modelscope download --model google/siglip2-giant-opt-patch16-384 --local_dir models/siglip2-giant-opt-patch16-384
 ```
 
-使用本地模型时加 `--model-path models/siglip2-giant-opt-patch16-384`。完全离线时再将 YAML 的 `encoder.local_files_only` 设为 `true`。本地目录必须是同一个检查点；Hugging Face 仓库文件可能同时包含双塔权重，训练只加载视觉分支。
+下载后直接运行训练命令即可，无需再传 `--model-path`。换用其他本地存放位置时，可通过该参数覆盖默认路径。本地目录必须是同一个检查点；镜像仓库可能同时包含双塔权重，训练只加载视觉分支。
 
 ### 五组监督训练
 
