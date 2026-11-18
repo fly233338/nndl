@@ -72,9 +72,9 @@ def resolve_device(config):
 class ImageDataset:
     """每张图片只出现一次，多条参考描述统一用于奖励计算。"""
 
-    def __init__(self, rows, root, image_size):
+    def __init__(self, rows, root, image_size, model_config=None):
         self.rows, self.root = rows, root
-        self.transform = image_transform(image_size, train=False)
+        self.transform = image_transform(image_size, train=False, config=model_config)
 
     def __len__(self):
         return len(self.rows)
@@ -91,8 +91,8 @@ def collate_images(batch):
     return torch.stack(images), list(ids)
 
 
-def make_loader(rows, config, image_size, shuffle=False):
-    dataset = ImageDataset(rows, image_root(config), image_size)
+def make_loader(rows, config, image_size, shuffle=False, model_config=None):
+    dataset = ImageDataset(rows, image_root(config), image_size, model_config)
     return torch.utils.data.DataLoader(
         dataset,
         batch_size=config["batch_size"],

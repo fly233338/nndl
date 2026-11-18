@@ -74,12 +74,14 @@ def compare(config_path, split="test", scst_checkpoint=None):
             "vocab": vocab.token_to_id,
             "image_size": model_config.get("image_size", 224),
             "max_length": model_config.get("max_length", 64),
+            "preprocessing": model_config.get("preprocessing", {}),
+            "decoding": model_config.get("decoding", {}),
         }
         if baseline_spec is None:
             baseline_spec = spec
         elif spec != baseline_spec:
             raise ValueError("CE/SCST vocabulary, image size and maximum length must match")
-        loader = make_loader(rows, config, spec["image_size"])
+        loader = make_loader(rows, config, spec["image_size"], model_config=model_config)
         results[name] = {}
         for decode in config["evaluation"]["decodes"]:
             if decode not in ("greedy", "beam"):

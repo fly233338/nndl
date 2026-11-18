@@ -5,6 +5,7 @@ import argparse
 import torch
 
 from .models import build_model
+from .models.checkpoint import align_vit_state_dict
 from .tokenizer import Vocabulary
 
 
@@ -13,11 +14,13 @@ def load_caption_model(checkpoint: str, device: str = "cpu"):
     state = torch.load(checkpoint, map_location=device, weights_only=False)
     vocab = Vocabulary(state["vocab"])
     model = build_model(state["model_name"], len(vocab.token_to_id), state["config"])
-    model.load_state_dict(state["model"])
+    weights, _ = align_vit_state_dict(state["model"], model.state_dict())
+    model.load_state_dict(weights, strict=True)
     model.to(device).eval()
     return model, vocab, state
 
 
+@torch.no_grad()
 def predict(
     checkpoint: str,
     image_path: str,
@@ -39,7 +42,7 @@ def predict(
     beam_size = 1 if decode == "greedy" else int(beam_size or config.get("beam_size", 3))
     device = next(model.parameters()).device
     image = (
-        image_transform(image_size)(Image.open(image_path).convert("RGB")).unsqueeze(0).to(device)
+        image_transform(image_size, config=config)(Image.open(image_path).convert("RGB")).unsqueeze(0).to(device)
     )
     ids = model.generate(
         image,

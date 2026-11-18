@@ -1,0 +1,6 @@
+base: 04_finetune.yaml
+output_dir: results/captioning_improved/07_resolution
+image_size: 384
+batch_size: 8
+gradient_accumulation_steps: 4
+eval_batch_size: 4

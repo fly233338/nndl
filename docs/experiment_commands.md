@@ -1,6 +1,6 @@
 # 实验运行命令
 
-以下命令在 Linux 服务器的项目根目录执行。环境安装见 [环境与数据准备](task2_training.md)，RL、Judge 和任务三见 [选做任务命令](optional_server_commands.md)。已有数据或模型可跳过对应准备和训练步骤。
+以下命令在 Linux 服务器的项目根目录执行。环境安装见 [环境与数据准备](task2_training.md)，RL 和 Judge 见 [选做任务命令](optional_server_commands.md)。已有数据或模型可跳过对应准备和训练步骤。
 
 ## 1. 环境与数据
 
@@ -15,7 +15,7 @@ export CUDA_VISIBLE_DEVICES=0
 python -m experiments.task1_captioning.prepare_food500cap_hf --dataset-dir data/raw/Food500Cap
 ```
 
-任务二和任务三共用课程标注与图片；先在 `config/data.yaml` 确认路径。
+任务二使用课程标注与图片；先在 `config/data.yaml` 确认路径。
 
 ```bash
 python -m experiments.task2_meal_json.prepare_meal_json
@@ -38,6 +38,8 @@ for model in cnn_gru attention_rnn transformer graph_transformer vit_transformer
   done
 done
 ```
+
+任务一新增的归一化、增强与微调配置，以及新编码器的后续设计见 [任务一提分方案](task1_improvements.md)。上述五种结构仍作为基线保留。
 
 ## 3. 任务二：膳食 JSON
 
@@ -91,4 +93,4 @@ done
 
 `--zero-shot` 与 `--adapter-dir` 互斥；不指定 `--output` 时按原始模型名称、推理模式和划分自动保存到独立目录。已有任务二汇总未包含这组结果，需实际推理和评测后再补表。
 
-参数消融见 [消融命令](task2_tuning.md)，草稿复核见 [复核命令](task2_draft_review.md)。汇总时保留食物 F1、各字段 MSE、数值覆盖率和 Schema 有效率。
+参数消融见 [消融命令](task2_tuning.md)。汇总时保留食物 F1、各字段 MSE、数值覆盖率和 Schema 有效率。

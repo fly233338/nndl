@@ -52,5 +52,14 @@ def build_model(name: str, vocab_size: int, config: dict):
 
         transformer["vit_path"] = config.get("vit_path")
         transformer.pop("resnet_path", None)
-        return ViTTransformer(vocab_size=vocab_size, **transformer)
+        return ViTTransformer(
+            vocab_size=vocab_size, **transformer,
+            global_fusion=config.get("global_fusion", "none"),
+            dropout=config.get("dropout", 0.1),
+            norm_first=config.get("norm_first", False),
+            feedforward_dim=config.get("feedforward_dim", 2048),
+            activation=config.get("activation", "relu"),
+            tie_embeddings=config.get("tie_embeddings", False),
+            decoding=config.get("decoding", {}),
+        )
     raise ValueError(f"Unknown caption model: {name}")

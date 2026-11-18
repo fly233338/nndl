@@ -2,17 +2,22 @@
 
 import argparse
 import json
+import time
+from functools import partial
 from pathlib import Path
 
 import torch
 
-from utils.jsonl import read_jsonl, write_jsonl
+from utils.jsonl import write_jsonl
+from utils.config import load_yaml
+from utils.files import sha256_file
 from utils.metrics import evaluate_caption_records, metric_metadata
 
-from .datasets import image_transform
+from .datasets import CaptionDataset, collate_caption
 from .infer import load_caption_model
 
 
+@torch.no_grad()
 def evaluate(
     checkpoint: str,
     manifest: str,
@@ -22,9 +27,9 @@ def evaluate(
     beam_size: int | None = None,
     decode: str = "beam",
     image_size: int | None = None,
+    batch_size: int | None = None,
+    decode_config: str | None = None,
 ):
-    from PIL import Image
-
     model, vocab, state = load_caption_model(
         checkpoint,
         "cuda" if torch.cuda.is_available() else "cpu",
@@ -34,32 +39,29 @@ def evaluate(
     image_size = int(image_size or config.get("image_size", 224))
     beam_size = 1 if decode == "greedy" else int(beam_size or config.get("beam_size", 3))
     device = next(model.parameters()).device
-    transform = image_transform(image_size)
+    if decode_config:
+        if not hasattr(model.decoder, "decoding"):
+            raise ValueError("Decode settings are supported by Transformer decoders")
+        model.decoder.decoding.update(load_yaml(decode_config).get("decoding", {}))
+    dataset = CaptionDataset(manifest, image_root, vocab, max_length, False, image_size, config, True)
+    loader = torch.utils.data.DataLoader(
+        dataset, batch_size=batch_size or config.get("eval_batch_size", config.get("batch_size", 16)),
+        shuffle=False, num_workers=config.get("num_workers", 0),
+        collate_fn=partial(collate_caption, pad_id=vocab.token_to_id["<pad>"]),
+    )
     records = []
-    for row in read_jsonl(manifest):
-        image = (
-            transform(Image.open(Path(image_root) / row["image_path"]).convert("RGB"))
-            .unsqueeze(
-                0,
-            )
-            .to(
-                device,
-            )
+    started = time.perf_counter()
+    for images, _, image_ids in loader:
+        sequences = model.generate(
+            images.to(device), vocab.token_to_id["<bos>"], vocab.token_to_id["<eos>"],
+            max_length, beam_size,
         )
-        ids = model.generate(
-            image,
-            vocab.token_to_id["<bos>"],
-            vocab.token_to_id["<eos>"],
-            max_length,
-            beam_size,
-        )[0].tolist()
-        records.append(
-            {
-                "image_id": row["image_id"],
-                "references": row["captions"],
-                "prediction": vocab.decode(ids),
-            },
-        )
+        for image_id, ids in zip(image_ids, sequences):
+            records.append({
+                "image_id": image_id, "references": dataset.references[image_id],
+                "prediction": vocab.decode(ids.tolist()),
+            })
+    inference_seconds = time.perf_counter() - started
 
     target = Path(output)
     target.parent.mkdir(parents=True, exist_ok=True)
@@ -72,6 +74,12 @@ def evaluate(
             "decode": decode,
             "beam_size": beam_size,
             "image_size": image_size,
+            "decoding": getattr(model.decoder, "decoding", {}),
+            "preprocessing": config.get("preprocessing", "legacy_imagenet"),
+            "inference_seconds": inference_seconds,
+            "seconds_per_image": inference_seconds / max(1, len(records)),
+            "manifest_sha256": sha256_file(manifest),
+            "checkpoint_sha256": sha256_file(checkpoint),
         },
     )
     try:
@@ -92,6 +100,8 @@ if __name__ == "__main__":
     parser.add_argument("--image-size", type=int)
     parser.add_argument("--beam-size", type=int)
     parser.add_argument("--decode", choices=["greedy", "beam"], default="beam")
+    parser.add_argument("--batch-size", type=int)
+    parser.add_argument("--decode-config")
     args = parser.parse_args()
     evaluate(
         args.checkpoint,
@@ -102,4 +112,6 @@ if __name__ == "__main__":
         args.beam_size,
         args.decode,
         args.image_size,
+        args.batch_size,
+        args.decode_config,
     )

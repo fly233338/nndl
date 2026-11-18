@@ -13,9 +13,18 @@ class ViTTransformer(nn.Module):
         max_length: int = 128,
         freeze_encoder: bool = True,
         vit_path: str | None = None,
+        global_fusion: str = "none",
+        dropout: float = 0.1,
+        norm_first: bool = False,
+        feedforward_dim: int = 2048,
+        activation: str = "relu",
+        tie_embeddings: bool = False,
+        decoding: dict | None = None,
     ):
         super().__init__()
-        self.encoder = ViTPatches(freeze_encoder, vit_path)
+        if global_fusion not in ("none", "concat", "gated"):
+            raise ValueError("global_fusion must be none, concat or gated")
+        self.encoder = ViTPatches(freeze_encoder, vit_path, include_cls=global_fusion != "none")
         self.decoder = TransformerDecoder(
             vocab_size,
             self.encoder.output_dim,
@@ -25,6 +34,13 @@ class ViTTransformer(nn.Module):
             max_length,
             use_visual_encoder=False,
             use_2d_position=False,
+            global_fusion=global_fusion,
+            dropout=dropout,
+            norm_first=norm_first,
+            feedforward_dim=feedforward_dim,
+            activation=activation,
+            tie_embeddings=tie_embeddings,
+            decoding=decoding,
         )
 
     def forward(self, images, tokens):

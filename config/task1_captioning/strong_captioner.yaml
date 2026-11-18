@@ -1,0 +1,100 @@
+seed: 2026
+output_dir: results/captioning_siglip
+continuation: false
+
+data:
+  train_manifest: data/processed/food500cap/train.jsonl
+  val_manifest: data/processed/food500cap/val.jsonl
+  test_manifest: data/processed/food500cap/test.jsonl
+  image_root: data/processed/food500cap/images
+  vocab_path: data/processed/food500cap/vocab.json
+  max_length: 64
+  num_workers: 4
+
+encoder:
+  model_id: google/siglip2-giant-opt-patch16-384
+  model_path: null
+  revision: main
+  local_files_only: false
+
+preprocessing:
+  image_size: 384
+  mean: [0.5, 0.5, 0.5]
+  std: [0.5, 0.5, 0.5]
+  interpolation: bilinear
+
+model:
+  dim: 768
+  layers: 8
+  heads: 12
+  ffn_dim: 2048
+  activation: swiglu
+  dropout: 0.1
+  tie_embeddings: true
+  gradient_checkpointing: false
+
+augmentation:
+  enabled: true
+  horizontal_flip: 0.5
+  rotation_probability: 0.3
+  rotation_degrees: 5.0
+  jitter_probability: 0.3
+  brightness: 0.1
+  contrast: 0.1
+  direction_words: [left, right, leftmost, rightmost, clockwise, counterclockwise, top, bottom, above, below, upper, lower]
+  color_words: [red, green, blue, yellow, orange, brown, white, black, pink, purple, golden, dark, light, pale]
+
+training:
+  device: cuda
+  mixed_precision: bf16
+  batch_size: 8
+  eval_batch_size: 8
+  gradient_accumulation_steps: 8
+  epochs: 60
+  learning_rate: 0.0002
+  betas: [0.9, 0.98]
+  eps: 1.0e-8
+  weight_decay: 0.01
+  warmup_ratio: 0.05
+  min_lr_ratio: 0.01
+  label_smoothing: 0.05
+  grad_clip: 1.0
+  patience: 10
+  min_delta: 0.001
+
+decoding:
+  beam_size: 3
+  length_penalty: 0.0
+
+lora:
+  enabled: false
+  last_layers: 8
+  rank: 16
+  alpha: 32
+  dropout: 0.05
+  learning_rate: 0.0001
+
+# 单文件预设，仅覆盖上方基础设置，不串联旧实验配置。
+experiments:
+  s_gelu:
+    model: {dim: 512, layers: 4, heads: 8, ffn_dim: 2048, activation: gelu}
+    augmentation: {enabled: false}
+  s_swiglu:
+    model: {dim: 512, layers: 4, heads: 8, ffn_dim: 1408}
+    augmentation: {enabled: false}
+  m_swiglu:
+    augmentation: {enabled: false}
+  m_swiglu_aug: {}
+  l_swiglu_aug:
+    model: {dim: 1024, layers: 12, heads: 16, ffn_dim: 2816, gradient_checkpointing: true}
+  continue_384:
+    continuation: true
+    training: {epochs: 10, learning_rate: 0.00002}
+  continue_512:
+    continuation: true
+    preprocessing: {image_size: 512}
+    training: {epochs: 10, learning_rate: 0.00002, batch_size: 4, gradient_accumulation_steps: 16}
+  lora_384:
+    continuation: true
+    lora: {enabled: true}
+    training: {epochs: 10, learning_rate: 0.00002, batch_size: 2, gradient_accumulation_steps: 32}

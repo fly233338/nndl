@@ -1,0 +1,16 @@
+base: 01_normalization.yaml
+output_dir: results/captioning_improved/02_recipe
+learning_rate: 0.0001
+encoder_learning_rate: 0.00001
+weight_decay: 0.01
+scheduler: cosine
+warmup_ratio: 0.05
+min_lr_ratio: 0.1
+label_smoothing: 0.1
+grad_clip: 5.0
+mixed_precision: bf16
+dropout: 0.1
+norm_first: true
+activation: gelu
+feedforward_dim: 2048
+tie_embeddings: false

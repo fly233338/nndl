@@ -88,8 +88,8 @@ def train(config_path):
     max_length = model_config.get("max_length", 64)
     if not 2 <= max_length <= model.decoder.position.num_embeddings:
         raise ValueError("Invalid generation length in checkpoint")
-    loader = make_loader(train_rows, config, image_size, shuffle=True)
-    val_loader = make_loader(val_rows, config, image_size)
+    loader = make_loader(train_rows, config, image_size, shuffle=True, model_config=model_config)
+    val_loader = make_loader(val_rows, config, image_size, model_config=model_config)
     if config["validation_decode"] not in ("greedy", "beam"):
         raise ValueError("validation_decode must be greedy or beam")
     beam_size = 1 if config["validation_decode"] == "greedy" else config["beam_size"]

@@ -71,9 +71,9 @@ class ResNetGrid(_FrozenModule):
 
 
 class ViTPatches(_FrozenModule):
-    """提取 ViT 块词元，去除 CLS 词元。"""
+    """提取 ViT 特征，支持位置插值和末层微调。"""
 
-    def __init__(self, freeze: bool = True, model_path: str | None = None):
+    def __init__(self, freeze: bool = True, model_path: str | None = None, include_cls=False):
         super().__init__()
         if model_path:
             from transformers import AutoModel
@@ -89,16 +89,56 @@ class ViTPatches(_FrozenModule):
             self.huggingface = False
         self._frozen_name = "model"
         self._set_frozen(self.model, freeze)
+        self.include_cls = include_cls
+        self._trainable_blocks = None
+
+    def _blocks_and_norm(self):
+        if not self.huggingface:
+            return list(self.model.encoder.layers), self.model.encoder.ln
+        if hasattr(self.model, "encoder"):
+            return list(self.model.encoder.layer), self.model.layernorm
+        return list(self.model.layers), self.model.layernorm
+
+    def set_trainable_blocks(self, count):
+        blocks, norm = self._blocks_and_norm()
+        if not 0 <= count <= len(blocks):
+            raise ValueError(f"trainable_blocks must be between 0 and {len(blocks)}")
+        self.model.requires_grad_(False)
+        for block in blocks[-count:] if count else []:
+            block.requires_grad_(True)
+        norm.requires_grad_(count > 0)
+        self._trainable_blocks, self._freeze = count, count == 0
+        self.train(self.training)
+
+    def train(self, mode=True):
+        super().train(mode)
+        if getattr(self, "_trainable_blocks", None) is not None:
+            self.model.eval()
+            blocks, norm = self._blocks_and_norm()
+            for block in blocks[-self._trainable_blocks:] if self._trainable_blocks else []:
+                block.train(mode)
+            norm.train(mode and self._trainable_blocks > 0)
+        return self
 
     def forward(self, images):
         if self.huggingface:
-            tokens = self.model(pixel_values=images).last_hidden_state
+            tokens = self.model(pixel_values=images, interpolate_pos_encoding=True).last_hidden_state
         else:
-            x = self.model._process_input(images)
+            x = self.model.conv_proj(images).flatten(2).transpose(1, 2)
             n = x.shape[0]
             x = torch.cat([self.model.class_token.expand(n, -1, -1), x], dim=1)
-            tokens = self.model.encoder(x)
-        return tokens[:, 1:]
+            position = self.model.encoder.pos_embedding
+            if x.size(1) != position.size(1):
+                side = int(math.sqrt(position.size(1) - 1))
+                patches = position[:, 1:].transpose(1, 2).reshape(1, self.output_dim, side, side)
+                patches = torch.nn.functional.interpolate(
+                    patches, size=(images.size(-2) // self.model.patch_size, images.size(-1) // self.model.patch_size),
+                    mode="bicubic", align_corners=True,
+                ).flatten(2).transpose(1, 2)
+                position = torch.cat([position[:, :1], patches], dim=1)
+            x = self.model.encoder.dropout(x + position)
+            tokens = self.model.encoder.ln(self.model.encoder.layers(x))
+        return tokens if self.include_cls else tokens[:, 1:]
 
 
 class AdditiveAttention(nn.Module):
@@ -234,6 +274,13 @@ class TransformerDecoder(nn.Module):
         use_visual_encoder: bool = True,
         use_2d_position: bool = False,
         pad_id: int = 0,
+        dropout: float = 0.1,
+        norm_first: bool = False,
+        feedforward_dim: int = 2048,
+        activation: str = "relu",
+        tie_embeddings: bool = False,
+        global_fusion: str = "none",
+        decoding: dict | None = None,
     ):
         super().__init__()
         self.embedding = nn.Embedding(vocab_size, embedding_dim, padding_idx=pad_id)
@@ -242,17 +289,35 @@ class TransformerDecoder(nn.Module):
         self.use_visual_encoder = use_visual_encoder
         self.use_2d_position = use_2d_position
         self.pad_id = pad_id
+        self.global_fusion = global_fusion
+        self.decoding = decoding or {}
+        if global_fusion == "gated":
+            self.global_projection = nn.Linear(feature_dim, feature_dim)
+            self.global_gate = nn.Linear(feature_dim * 2, feature_dim)
+        layer_options = dict(
+            dim_feedforward=feedforward_dim, dropout=dropout,
+            norm_first=norm_first, activation=activation, batch_first=True,
+        )
         if use_visual_encoder:
-            encoder_layer = nn.TransformerEncoderLayer(embedding_dim, heads, batch_first=True)
+            encoder_layer = nn.TransformerEncoderLayer(embedding_dim, heads, **layer_options)
             self.encoder = nn.TransformerEncoder(encoder_layer, layers)
         else:
             self.encoder = None
-        decoder_layer = nn.TransformerDecoderLayer(embedding_dim, heads, batch_first=True)
-        self.decoder = nn.TransformerDecoder(decoder_layer, layers)
+        decoder_layer = nn.TransformerDecoderLayer(embedding_dim, heads, **layer_options)
+        self.decoder = nn.TransformerDecoder(
+            decoder_layer, layers, norm=nn.LayerNorm(embedding_dim) if norm_first else None,
+        )
         self.output = nn.Linear(embedding_dim, vocab_size)
+        if tie_embeddings:
+            self.output.weight = self.embedding.weight
 
     def _encode(self, features):
         """投影视觉特征，并按配置添加网格位置编码和视觉编码层。"""
+        if self.global_fusion == "gated":
+            global_token, patches = features[:, :1], features[:, 1:]
+            context = global_token.expand(-1, patches.size(1), -1)
+            gate = self.global_gate(torch.cat([patches, context], dim=-1)).sigmoid()
+            features = patches + gate * self.global_projection(context)
         projected = self.input_projection(features)
         if self.use_2d_position:
             projected = projected + _grid_position(
@@ -286,8 +351,26 @@ class TransformerDecoder(nn.Module):
     def forward(self, features, tokens):
         return self._decode(self._encode(features), tokens)
 
+    def _filter_logits(self, logits, tokens, bos_id, eos_id):
+        if self.decoding.get("suppress_special_tokens", False):
+            logits[:, [self.pad_id, bos_id]] = -torch.inf
+        if tokens.size(1) - 1 < self.decoding.get("min_length", 0):
+            logits[:, eos_id] = -torch.inf
+        size = int(self.decoding.get("no_repeat_ngram_size", 0))
+        if size and tokens.size(1) >= size:
+            for row, sequence in enumerate(tokens.tolist()):
+                prefix = tuple(sequence[-(size - 1):]) if size > 1 else ()
+                banned = [
+                    sequence[index + size - 1]
+                    for index in range(len(sequence) - size + 1)
+                    if tuple(sequence[index:index + size - 1]) == prefix
+                ]
+                logits[row, banned] = -torch.inf
+        return logits
+
     @torch.no_grad()
     def generate(self, features, bos_id: int, eos_id: int, max_length: int, beam_size: int = 1):
+        memory = self._encode(features)
         if beam_size <= 1:
             tokens = torch.full(
                 (features.size(0), 1),
@@ -297,7 +380,8 @@ class TransformerDecoder(nn.Module):
             )
             finished = torch.zeros(features.size(0), dtype=torch.bool, device=features.device)
             for _ in range(max_length - 1):
-                next_token = self.forward(features, tokens)[:, -1].argmax(-1, keepdim=True)
+                logits = self._filter_logits(self._decode(memory, tokens)[:, -1], tokens, bos_id, eos_id)
+                next_token = logits.argmax(-1, keepdim=True)
                 next_token = torch.where(
                     finished.unsqueeze(1),
                     torch.full_like(next_token, eos_id),
@@ -309,39 +393,33 @@ class TransformerDecoder(nn.Module):
                     break
             return tokens
 
-        results = []
-        for index in range(features.size(0)):
-            sample_features = features[index : index + 1]
-            beams = [(torch.tensor([[bos_id]], device=features.device), 0.0, False)]
-            for _ in range(max_length - 1):
-                candidates = []
-                for sequence, score, finished in beams:
-                    if finished:
-                        candidates.append((sequence, score, True))
-                        continue
-                    log_probs = self.forward(sample_features, sequence)[:, -1].log_softmax(-1)
-                    values, indices = torch.topk(
-                        log_probs,
-                        min(beam_size, log_probs.size(-1)),
-                        dim=-1,
-                    )
-                    for value, token_id in zip(values[0], indices[0]):
-                        token = token_id.view(1, 1)
-                        candidates.append(
-                            (
-                                torch.cat([sequence, token], dim=1),
-                                score + float(value),
-                                bool(token_id == eos_id),
-                            ),
-                        )
-                candidates.sort(key=lambda item: item[1], reverse=True)
-                beams = candidates[:beam_size]
-                if all(item[2] for item in beams):
-                    break
-            results.append(beams[0][0].squeeze(0))
-
-        width = max(sequence.numel() for sequence in results)
-        output = torch.full((len(results), width), eos_id, device=features.device, dtype=torch.long)
-        for index, sequence in enumerate(results):
-            output[index, : sequence.numel()] = sequence
-        return output
+        batch, _, dim = memory.shape
+        beam_size = min(beam_size, self.output.out_features)
+        memory = memory[:, None].expand(-1, beam_size, -1, -1).reshape(batch * beam_size, -1, dim)
+        tokens = torch.full((batch, beam_size, 1), bos_id, device=features.device, dtype=torch.long)
+        scores = torch.full((batch, beam_size), -torch.inf, device=features.device)
+        scores[:, 0] = 0
+        finished = torch.zeros_like(scores, dtype=torch.bool)
+        lengths = torch.zeros_like(scores, dtype=torch.long)
+        alpha = float(self.decoding.get("length_penalty", 0))
+        for _ in range(max_length - 1):
+            flat_tokens = tokens.reshape(batch * beam_size, -1)
+            logits = self._decode(memory, flat_tokens)[:, -1]
+            logits = self._filter_logits(logits, flat_tokens, bos_id, eos_id)
+            log_probs = logits.log_softmax(-1).reshape(batch, beam_size, -1)
+            log_probs = log_probs.masked_fill(finished[:, :, None], -torch.inf)
+            log_probs[:, :, eos_id] = torch.where(finished, 0.0, log_probs[:, :, eos_id])
+            candidate_scores = scores[:, :, None] + log_probs
+            candidate_lengths = lengths + (~finished).long()
+            rank = candidate_scores / ((5 + candidate_lengths[:, :, None]).float() / 6).pow(alpha)
+            _, selected = rank.flatten(1).topk(beam_size, dim=-1)
+            parents = selected // log_probs.size(-1)
+            next_tokens = selected % log_probs.size(-1)
+            tokens = tokens.gather(1, parents[:, :, None].expand(-1, -1, tokens.size(-1)))
+            tokens = torch.cat([tokens, next_tokens[:, :, None]], dim=-1)
+            scores = candidate_scores.flatten(1).gather(1, selected)
+            lengths = candidate_lengths.gather(1, parents)
+            finished = finished.gather(1, parents) | next_tokens.eq(eos_id)
+            if finished.all():
+                break
+        return tokens[:, 0]
