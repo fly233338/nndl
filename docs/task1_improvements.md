@@ -132,7 +132,32 @@ python -m experiments.task1_captioning.strong_captioner train --experiment m_swi
 
 恢复时必须保持原实验、种子、训练日程和训练/验证清单。若初次使用了 batch、累积或本地模型参数，恢复时继续提供同样参数。改变总轮数、图像尺寸或 LoRA 设置时使用 `--init-checkpoint` 开始新的续训实验。
 
-## 5. 记录与分析
+## 5. 数据泄漏审计
+
+已经训练的模型无需重训。服务器从项目根目录运行以下命令，读取实际运行配置、元数据、保存的词表和三个数据清单，只使用 CPU，不加载模型：
+
+```powershell
+python -m experiments.task1_captioning.audit_data --run-dir results/captioning_siglip/m_swiglu_aug/seed_2026 --output results/captioning_siglip/m_swiglu_aug/seed_2026/data_audit.json
+```
+
+优先检查：
+
+- `manifest_identity`：当前 train/val 清单哈希必须与训练时的记录相同，否则不能用现在的清单证明过去那次训练没有重叠。
+- `image_id`、`image_sha256`：三个集合两两交集都应为 0，且 `complete` 为 true；缺少哈希字段会标记未完成，不会当作已排除重复。
+- `vocabulary.extra_tokens_not_in_train`：默认 min_freq=1 下应为 0。额外词也可能来自旧词表或外部词表，出现时需查来源，不能直接判定读过测试答案。
+- `test_evaluation.matches` 与 `count_matches`：应为 true，确认检查的测试清单就是这次评分使用的清单。
+
+可进一步读取真实图片，检查不同文件名、相同 RGB 像素的图像。这比清单审计慢，但仍不使用 GPU：
+
+```powershell
+python -m experiments.task1_captioning.audit_data --run-dir results/captioning_siglip/m_swiglu_aug/seed_2026 --pixel-hashes --output results/captioning_siglip/m_swiglu_aug/seed_2026/data_audit_pixels.json
+```
+
+数据移动后用 `--data-dir`、`--image-root` 指向原清单和图片的新位置；不同评测文件用 `--metrics` 指定。不要重新生成清单后再拿新清单替旧训练作证明。审计只在指定 `--output` 时写报告，不修改数据、词表或权重。
+
+`status` 为 `passed_checked_items` 表示所列检查通过；`needs_review` 表示有问题待查；`incomplete` 表示证据不全。退出码依次为 0、1、2。这些检查不覆盖近似重复图片、SigLIP 预训练数据重叠，或人为看测试分数反复调参；不能据此宣称绝对不存在任何形式的数据泄漏。
+
+## 6. 记录与分析
 
 每次运行保存 `run_config.json`、`run_metadata.json`、`training_history.json`、`vocab.json`、`best.pt`、`last.pt` 及最佳验证描述。记录实际参数量、可训练视觉参数、输入 Token 数、有效 batch、更新步数、模型版本、数据清单哈希、词元截断数量、学习率、每轮耗时与显存峰值。
 
