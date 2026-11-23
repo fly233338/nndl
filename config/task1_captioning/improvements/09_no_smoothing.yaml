@@ -1,3 +1,0 @@
-base: 02_recipe.yaml
-output_dir: results/captioning_improved/09_no_smoothing
-label_smoothing: 0.0

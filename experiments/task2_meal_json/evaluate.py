@@ -55,7 +55,7 @@ def item_scores(gold_labels, predicted_labels):
     return micro, sum(class_f1) / len(class_f1) if class_f1 else 0.0
 
 
-def structured_metrics(rows):
+def structured_metrics(rows, include_text=True):
     """保留无效输出，分别报告结构有效率、数值覆盖率和预测误差。"""
     gold, predicted, text_records = [], [], []
     parsed_count = valid_count = complete_count = 0
@@ -117,7 +117,13 @@ def structured_metrics(rows):
                 counts[field] += 1
 
     micro, macro = item_scores(gold, predicted)
-    result = evaluate_caption_records(text_records)
+    result = evaluate_caption_records(text_records) if include_text else {}
+    tp = fp = fn = 0
+    for target, prediction in zip(gold, predicted):
+        actual, proposed = _item_names(target), _item_names(prediction)
+        tp += len(actual & proposed)
+        fp += len(proposed - actual)
+        fn += len(actual - proposed)
     schema_valid_rate = valid_count / max(1, len(rows))
     mse = {
         field: sums[field] / counts[field] if counts[field] else None for field in NUMERIC_FIELDS
@@ -133,6 +139,12 @@ def structured_metrics(rows):
             ),
             "item_micro_f1": micro,
             "item_macro_f1": macro,
+            "item_precision": tp / max(1, tp + fp),
+            "item_recall": tp / max(1, tp + fn),
+            "item_tp": tp,
+            "item_fp": fp,
+            "item_fn": fn,
+            "num_samples": len(rows),
             "mse": mse,
             "numeric_coverage": numeric_coverage,
             "metric_summary": {

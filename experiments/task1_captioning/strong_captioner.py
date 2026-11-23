@@ -1,4 +1,4 @@
-"""独立的 SigLIP 2 + 自建 Transformer 描述实验。"""
+"""ViT / SigLIP + 自建 Transformer 的独立架构对照。"""
 
 import argparse
 import copy
@@ -38,6 +38,7 @@ def merge_config(base, override):
 
 def experiment_config(path, name):
     config = load_yaml(path)
+    name = config.pop("aliases", {}).get(name, name)
     experiments = config.pop("experiments")
     if name not in experiments:
         raise ValueError(f"Unknown experiment {name}; choose from {list(experiments)}")
@@ -252,13 +253,17 @@ class CaptionDecoder(nn.Module):
 class StrongCaptioner(nn.Module):
     def __init__(self, config, vocab, device):
         super().__init__()
-        from transformers import SiglipVisionModel
+        from transformers import SiglipVisionModel, ViTModel
 
         self.config = config
         encoder = config["encoder"]
         precision = config["training"]["mixed_precision"]
         dtype = {"bf16": torch.bfloat16, "fp16": torch.float16, "none": torch.float32}[precision]
-        self.vision = SiglipVisionModel.from_pretrained(
+        self.encoder_type = encoder.get("type", "siglip")
+        if self.encoder_type not in ("siglip", "vit"):
+            raise ValueError("encoder.type must be siglip or vit")
+        visual_class = ViTModel if self.encoder_type == "vit" else SiglipVisionModel
+        self.vision = visual_class.from_pretrained(
             encoder["model_path"] or encoder["model_id"], revision=encoder["revision"],
             local_files_only=encoder["local_files_only"],
             torch_dtype=dtype if device.type == "cuda" else torch.float32,
@@ -274,6 +279,8 @@ class StrongCaptioner(nn.Module):
         self.lora_enabled = config["lora"]["enabled"]
         self.lora_targets = []
         if self.lora_enabled:
+            if self.encoder_type != "siglip":
+                raise ValueError("Legacy vision LoRA is only supported for SigLIP")
             self.add_lora(config["lora"])
         self.decoder = CaptionDecoder(
             config, self.vision.config.hidden_size, len(vocab.token_to_id), vocab.token_to_id["<pad>"],
@@ -313,6 +320,8 @@ class StrongCaptioner(nn.Module):
         context = nullcontext() if self.lora_enabled and self.training else torch.no_grad()
         with context:
             patches = self.vision(pixel_values=images, interpolate_pos_encoding=True).last_hidden_state
+            if self.encoder_type == "vit":
+                patches = patches[:, 1:]
         return self.decoder.project(patches)
 
     def forward(self, images, tokens):
@@ -333,12 +342,14 @@ class StrongCaptioner(nn.Module):
             self.vision.load_state_dict(adapters, strict=False)
 
     @torch.no_grad()
-    def generate(self, images, vocab, beam_size=None):
+    def generate(self, images, vocab, beam_size=None, max_new_tokens=None):
         decode = self.config["decoding"]
         beam = beam_size or decode["beam_size"]
         if not 1 <= beam <= len(vocab.token_to_id):
             raise ValueError("beam_size must be between 1 and the vocabulary size")
         max_length = self.config["data"]["max_length"]
+        if max_new_tokens is not None:
+            max_length = min(max_length, max_new_tokens + 1)
         bos, eos = vocab.token_to_id["<bos>"], vocab.token_to_id["<eos>"]
         memory = self.memory(images)
         batch, device = images.size(0), images.device
@@ -525,6 +536,8 @@ def train(args):
         if source_state.get("format") != "siglip_captioner_v1":
             raise ValueError("Use a checkpoint produced by strong_captioner.py")
         previous = source_state["config"]
+        if args.resume:
+            config = copy.deepcopy(previous)
         if config.get("continuation", False):
             # 续训实验继承选中模型的结构，不把 S/L 检查点变回默认 M。
             for key in ("model", "augmentation"):
@@ -542,6 +555,15 @@ def train(args):
         config["seed"] = args.seed
     if args.model_path:
         config["encoder"]["model_path"] = args.model_path
+    if not args.resume:
+        from transformers import AutoImageProcessor
+        enc = config["encoder"]
+        processor = AutoImageProcessor.from_pretrained(
+            enc["model_path"] or enc["model_id"], revision=enc["revision"],
+            local_files_only=enc["local_files_only"],
+        )
+        config["preprocessing"].update(mean=list(processor.image_mean), std=list(processor.image_std),
+            interpolation={2: "bilinear", 3: "bicubic"}[int(processor.resample)])
     settings = config["training"]
     if min(settings["batch_size"], settings["gradient_accumulation_steps"], settings["epochs"]) < 1:
         raise ValueError("Batch size, accumulation and epochs must be positive")
@@ -627,7 +649,11 @@ def train(args):
             torch.cuda.reset_peak_memory_stats(device)
         train_loss, updates = loss_epoch(model, loaders[0], config, device, criterion, optimizer, scheduler, scaler)
         val_loss, _ = loss_epoch(model, loaders[1], config, device, criterion)
+        inference_started = time.perf_counter()
         records = generate_records(model, loaders[2], config, device, vocab)
+        if device.type == "cuda":
+            torch.cuda.synchronize(device)
+        inference_seconds = time.perf_counter() - inference_started
         cider = evaluate_caption_records(records, metrics=("CIDEr-D",))["CIDEr-D"]
         if not math.isfinite(cider):
             raise FloatingPointError("Non-finite validation CIDEr-D")
@@ -642,6 +668,7 @@ def train(args):
             torch.cuda.synchronize(device)
         record = {"epoch": epoch + 1, "global_step": global_step, "train_loss": train_loss,
                   "val_loss": val_loss, "val_CIDEr-D": cider, "seconds": time.perf_counter() - started,
+                  "inference_seconds": inference_seconds,
                   "learning_rates": scheduler.get_last_lr(),
                   "peak_memory_allocated": torch.cuda.max_memory_allocated(device) if device.type == "cuda" else None,
                   "peak_memory_reserved": torch.cuda.max_memory_reserved(device) if device.type == "cuda" else None}
@@ -661,6 +688,7 @@ def train(args):
         write_json(output / "training_history.json", history)
         print(json.dumps(record, ensure_ascii=False), flush=True)
     print(f"Best checkpoint: {output / 'best.pt'}", flush=True)
+    write_json(output / "completed.json", {"best_checkpoint": "best.pt", "best_val_CIDEr-D": best})
 
 
 def load_model(args):
@@ -723,8 +751,8 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest="command", required=True)
     training = commands.add_parser("train")
-    training.add_argument("--config", default="config/task1_captioning/strong_captioner.yaml")
-    training.add_argument("--experiment", default="m_swiglu_aug")
+    training.add_argument("--config", default="config/task1_captioning/ablation.yaml")
+    training.add_argument("--experiment", default="siglip_swiglu")
     training.add_argument("--seed", type=int)
     training.add_argument("--output-dir")
     training.add_argument("--batch-size", type=int)
@@ -746,6 +774,9 @@ def main():
             command.add_argument("--image", required=True)
         command.set_defaults(callback=callback)
     training.set_defaults(callback=train)
+    listing = commands.add_parser("list-experiments")
+    listing.add_argument("--config", default="config/task1_captioning/ablation.yaml")
+    listing.set_defaults(callback=lambda args: print("\n".join(load_yaml(args.config)["experiments"])))
     for command in (training, *[commands.choices[name] for name in ("evaluate", "predict")]):
         command.add_argument("--device")
         command.add_argument("--model-path", help="Optional local copy of the same SigLIP checkpoint")

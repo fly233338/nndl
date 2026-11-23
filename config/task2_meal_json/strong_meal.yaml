@@ -1,0 +1,2 @@
+# Compatibility path; parameters live in ablation.yaml
+base: ablation.yaml

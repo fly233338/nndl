@@ -10,7 +10,7 @@ from pathlib import Path
 
 import torch
 
-from utils.config import load_yaml
+from utils.config import load_yaml, _merge
 from utils.files import sha256_file
 from utils.jsonl import read_jsonl
 from utils.metrics import evaluate_caption_records
@@ -120,8 +120,11 @@ def _git_revision():
         return None
 
 
-def train_model(config_path: str, model_name: str) -> Path:
+def train_model(config_path: str, model_name: str, seed=None, run_dir=None) -> Path:
     config = load_yaml(config_path)
+    config = _merge(config, config.get("experiments", {}).get(model_name, {}))
+    if seed is not None:
+        config["seed"] = seed
     config["preprocessing"] = resolve_preprocessing(config, model_name)
     seed = int(config.get("seed", 2026))
     seed_everything(seed)
@@ -163,7 +166,7 @@ def train_model(config_path: str, model_name: str) -> Path:
         raise ValueError("Partial block fine-tuning is configured for vit_transformer only")
     if partial_tuning:
         model.encoder.set_trainable_blocks(0)
-    output = Path(config.get("output_dir", "results/captioning")) / model_name
+    output = Path(run_dir) if run_dir else Path(config.get("output_dir", "results/captioning")) / model_name
     resume, initialize = config.get("resume"), config.get("init_checkpoint")
     if resume and initialize:
         raise ValueError("Choose resume or init_checkpoint, not both")
@@ -248,16 +251,23 @@ def train_model(config_path: str, model_name: str) -> Path:
         print(json.dumps(record), flush=True)
         if stale_epochs >= config.get("patience", 4):
             break
+    (output / "completed.json").write_text(json.dumps({"best_checkpoint": "best.pt", "best_val_CIDEr-D": best_cider}), encoding="utf-8")
     return output / "best.pt"
 
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--config", default="config/task1_captioning/captioning.yaml")
+    parser.add_argument("--config", default="config/task1_captioning/baseline.yaml")
+    parser.add_argument("--seed", type=int)
+    parser.add_argument("--run-dir")
     parser.add_argument("--model", choices=["cnn_gru", "attention_rnn", "transformer", "graph_transformer", "vit_transformer"])
     args = parser.parse_args()
-    for name in [args.model] if args.model else load_yaml(args.config)["models"]:
-        train_model(args.config, name)
+    config = load_yaml(args.config)
+    names = [args.model] if args.model else config.get("models", list(config.get("experiments", {})))
+    if args.run_dir and len(names) != 1:
+        parser.error("--run-dir requires one --model")
+    for name in names:
+        train_model(args.config, name, args.seed, args.run_dir)
 
 
 if __name__ == "__main__":

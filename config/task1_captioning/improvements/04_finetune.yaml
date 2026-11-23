@@ -1,5 +1,0 @@
-base: 03_augmentation.yaml
-output_dir: results/captioning_improved/04_finetune
-# 前三轮只训练解码器；从第四轮起解冻末两个视觉 Block。
-encoder_unfreeze_epoch: 3
-encoder_trainable_blocks: 2

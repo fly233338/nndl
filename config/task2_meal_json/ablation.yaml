@@ -1,0 +1,85 @@
+seed: 2026
+output_dir: results/meal_json/strong
+backend: qwen
+data:
+  data_dir: data/processed/meal_json
+  image_root: models
+  num_workers: 0
+  max_length: 2048
+qwen:
+  model_id: Qwen/Qwen3-VL-4B-Instruct
+  model_path: models/Qwen3-VL-4B-Instruct
+  revision: main
+  local_files_only: true
+  min_pixels: 65536
+  max_pixels: 200704
+  rank: 32
+  alpha: 64
+  dropout: 0.05
+  target_modules: [q_proj, k_proj, v_proj, o_proj, gate_proj, up_proj, down_proj]
+  gradient_checkpointing: true
+auxiliary:
+  items: false
+  numeric: false
+  hidden_dim: 512
+  item_weight: 0.2
+  numeric_weight: 0.1
+augmentation:
+  enabled: true
+  horizontal_flip: 0.5
+  rotation_probability: 0.3
+  rotation_degrees: 5.0
+  jitter_probability: 0.3
+  brightness: 0.1
+  contrast: 0.1
+  fill: [128, 128, 128]
+training:
+  device: cuda
+  mixed_precision: bf16
+  batch_size: 1
+  eval_batch_size: 1
+  gradient_accumulation_steps: 16
+  learning_rate: 0.00005
+  new_parameters_lr: 0.0002
+  betas: [0.9, 0.999]
+  eps: 1.0e-8
+  weight_decay: 0.01
+  warmup_ratio: 0.05
+  min_lr_ratio: 0.01
+  grad_clip: 1.0
+  epochs: 6
+  patience: 3
+decoding:
+  beam_size: 1
+  max_new_tokens: 768
+siglip:
+  caption_checkpoint: results/captioning_siglip/m_swiglu_aug/seed_2026/best.pt
+  model_path: models/siglip2-giant-opt-patch16-384
+  gradient_checkpointing: true
+experiments:
+  qwen_lora: {}
+  qwen_lora_item_aux:
+    auxiliary: {items: true}
+  qwen_lora_item_numeric_aux:
+    auxiliary: {items: true, numeric: true}
+  siglip_transfer:
+    backend: siglip
+    data: {max_length: 1024}
+    decoding: {max_new_tokens: 1023}
+    training: {epochs: 30, patience: 5}
+runner:
+  backend: meal
+  selection_metric: val_micro_f1
+  recipe: meal_auxiliary_supervision
+groups:
+  comparison: [siglip_transfer, qwen_lora]
+  ablation: [qwen_lora, qwen_lora_item_aux, qwen_lora_item_numeric_aux]
+aliases:
+  qwen_base: qwen_lora
+  qwen_items: qwen_lora_item_aux
+  qwen_items_numeric: qwen_lora_item_numeric_aux
+descriptions:
+  siglip_transfer: SigLIP captioner -> meal JSON
+  qwen_lora: Qwen3-VL-4B + LoRA (no auxiliary heads)
+  qwen_lora_item_aux: Qwen3-VL-4B + ingredient auxiliary head
+  qwen_lora_item_numeric_aux: Qwen3-VL-4B + ingredient and numeric auxiliary heads

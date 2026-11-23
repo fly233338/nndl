@@ -1,4 +1,0 @@
-base: ../meal_json.yaml
-output_dir: results/meal_json/tuning/vit_lr5e-5_ep10
-learning_rate: 0.00005
-epochs: 10

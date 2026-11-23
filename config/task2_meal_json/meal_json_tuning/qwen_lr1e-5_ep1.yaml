@@ -1,5 +1,0 @@
-base: ../meal_json.yaml
-output_dir: results/meal_json/tuning/qwen_lr1e-5_ep1
-qwen:
-  learning_rate: 0.00001
-  epochs: 1
